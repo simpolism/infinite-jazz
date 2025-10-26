@@ -239,7 +239,7 @@ class GenerationConfig:
         'temperature': 0.7,
         'top_p': 0.9,
         'repeat_penalty': 1.15,
-        'stop': ['\n\nDRUMS', '\n\nPIANO', '\n\nSAX', '\n\n']
+        'stop': ['\n\nDRUMS', '\n\nPIANO', '\n\nSAX']
     }
 
     DRUMS_CONFIG = {
@@ -247,7 +247,7 @@ class GenerationConfig:
         'temperature': 0.8,
         'top_p': 0.9,
         'repeat_penalty': 1.1,
-        'stop': ['\n\nPIANO', '\n\nSAX', '\n\nBASS', '\n\n']
+        'stop': ['\n\nPIANO', '\n\nSAX', '\n\nBASS']
     }
 
     PIANO_CONFIG = {
@@ -255,7 +255,7 @@ class GenerationConfig:
         'temperature': 0.75,
         'top_p': 0.92,
         'repeat_penalty': 1.12,
-        'stop': ['\n\nSAX', '\n\nBASS', '\n\nDRUMS', '\n\n']
+        'stop': ['\n\nSAX', '\n\nBASS', '\n\nDRUMS']
     }
 
     SAX_CONFIG = {
@@ -263,7 +263,7 @@ class GenerationConfig:
         'temperature': 0.85,
         'top_p': 0.95,
         'repeat_penalty': 1.1,
-        'stop': ['\n\nBASS', '\n\nDRUMS', '\n\nPIANO', '\n\n']
+        'stop': ['\n\nBASS', '\n\nDRUMS', '\n\nPIANO']
     }
 
     @classmethod

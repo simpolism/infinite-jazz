@@ -175,7 +175,6 @@ SAX GUIDELINES:
 - MONOPHONIC ONLY: Play ONE NOTE AT A TIME (saxophones CANNOT play chords!)
 - Each line must be either a SINGLE note OR a rest - NEVER multiple notes!
 - Melody range ONLY: A3 to F5 (comfortable tenor sax range, do NOT go higher!)
-- Bebop language: Scales, arpeggios, chromatic approaches
 - Phrase naturally with rests (don't play constantly)
 - Mix stepwise motion and leaps
 - Land on chord tones on strong beats

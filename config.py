@@ -2,6 +2,8 @@
 Configuration for JazzAI real-time jazz quartet generator
 """
 
+from tracker_parser import TrackerParser
+
 # Timing configuration
 TEMPO = 120  # BPM
 RESOLUTION = '8th'  # '8th' or '16th' note resolution
@@ -18,6 +20,14 @@ CHANNELS = {
     'DRUMS': 9,  # Channel 10 in 1-indexed (GM drum channel)
     'PIANO': 1,
     'SAX': 2,
+}
+
+# Instrument pitch ranges expressed as MIDI note numbers (inclusive)
+# Used for validation and retry logic
+PITCH_RANGES = {
+    'BASS': (TrackerParser.note_to_midi('E1'), TrackerParser.note_to_midi('G2')),
+    'PIANO': (TrackerParser.note_to_midi('C3'), TrackerParser.note_to_midi('C5')),
+    'SAX': (TrackerParser.note_to_midi('A3'), TrackerParser.note_to_midi('F5')),
 }
 
 # General MIDI Level 1 Drum Map (note numbers)

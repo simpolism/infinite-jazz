@@ -8,7 +8,7 @@ import re
 
 from llm_interface import LLMInterface, GenerationConfig
 from prompts import get_instrument_prompt
-from tracker_parser import parse_tracker, InstrumentTrack
+from tracker_parser import parse_tracker, InstrumentTrack, TrackerParser
 import config
 
 
@@ -49,7 +49,6 @@ class GenerationPipeline:
             print(f"{'='*60}\n")
 
         # Store generated parts for call-and-response
-        generated_parts = {}
         generated_text = {}
 
         # Generate each instrument in sequence
@@ -66,19 +65,24 @@ class GenerationPipeline:
                 previous_context=previous_context
             )
 
-            # Generate
-            gen_config = GenerationConfig.get_config(instrument)
-            raw_output = self.llm.generate(prompt, **gen_config)
-
-            # Post-process and validate
-            cleaned_output = self._clean_output(raw_output, instrument)
-            validated_output = self._validate_output(cleaned_output, instrument)
+            validated_output = self._generate_instrument_output(
+                instrument=instrument,
+                prompt=prompt
+            )
 
             # Store for next instrument
             generated_text[instrument] = validated_output
             if self.verbose:
                 print(f"\nGenerated {instrument}:")
                 print(validated_output[:200] + "..." if len(validated_output) > 200 else validated_output)
+
+            if instrument == 'PIANO':
+                self._check_pitch_range(
+                    instrument,
+                    validated_output,
+                    min_pitch=config.PITCH_RANGES['PIANO'][0],
+                    max_pitch=config.PITCH_RANGES['PIANO'][1]
+                )
 
         # Parse all parts together
         full_tracker = self._assemble_tracker(generated_text)
@@ -197,6 +201,115 @@ class GenerationPipeline:
         # Return the last section
         prev = self.history[-1]
         return self._assemble_tracker(prev)
+
+    def _generate_instrument_output(self, instrument: str, prompt: str) -> str:
+        """Generate output for a single instrument with retry strategy"""
+        attempts = 3
+        base_prompt = prompt
+
+        for attempt in range(1, attempts + 1):
+            gen_config = GenerationConfig.get_config(instrument)
+
+            attempt_prompt = base_prompt
+            if attempt > 1:
+                attempt_prompt += (
+                    "\n\nIMPORTANT: Respond with exactly "
+                    f"{config.get_total_steps()} lines.\n"
+                    "Each line must be either NOTE:VELOCITY (e.g., C2:80) "
+                    "or a single period '.' for a rest.\n"
+                    "Do not include explanations or leave the response blank."
+                )
+                if attempt == attempts:
+                    gen_config['temperature'] = min(gen_config['temperature'] + 0.1, 1.1)
+                    gen_config['repeat_penalty'] = max(gen_config['repeat_penalty'] - 0.05, 1.0)
+
+            raw_output = self.llm.generate(attempt_prompt, **gen_config)
+            cleaned_output = self._clean_output(raw_output, instrument)
+
+            if not cleaned_output.strip():
+                print(f"  Warning: {instrument} generation attempt {attempt} returned blank output.")
+                continue
+
+            validated_output = self._validate_output(cleaned_output, instrument)
+
+            out_of_range = self._detect_out_of_range(instrument, validated_output)
+            if out_of_range:
+                print(
+                    f"  Warning: {instrument} generation attempt {attempt} contains pitches outside"
+                    f" the allowed range. Regenerating. (Examples: {', '.join(sorted(out_of_range)[:3])})"
+                )
+                continue
+
+            if self._has_meaningful_content(validated_output):
+                return validated_output
+
+            print(f"  Warning: {instrument} generation attempt {attempt} produced only rests. Retrying...")
+
+        print(f"  Warning: {instrument} generation failed after {attempts} attempts. Using rests.")
+        rest_line = '.'
+        return '\n'.join([rest_line] * config.get_total_steps())
+
+    @staticmethod
+    def _has_meaningful_content(output: str) -> bool:
+        """Check if validated output contains any notes (not just rests)"""
+        for line in output.split('\n'):
+            stripped = line.strip()
+            if stripped and stripped != '.':
+                return True
+        return False
+
+    def _detect_out_of_range(self, instrument: str, output: str) -> set:
+        """Return set of pitches outside the allowed range for the instrument"""
+        if instrument not in config.PITCH_RANGES:
+            return set()
+
+        min_pitch, max_pitch = config.PITCH_RANGES[instrument]
+        invalid = set()
+
+        for line in output.split('\n'):
+            stripped = line.strip()
+            if not stripped or stripped == '.':
+                continue
+
+            for token in stripped.split(','):
+                token = token.strip().rstrip('.,;')
+                if ':' not in token:
+                    continue
+                note_part = token.split(':', 1)[0].strip()
+                try:
+                    midi_num = TrackerParser.note_to_midi(note_part)
+                    if not (min_pitch <= midi_num <= max_pitch):
+                        invalid.add(note_part)
+                except Exception:
+                    invalid.add(note_part)
+
+        return invalid
+
+    def _check_pitch_range(self, instrument: str, output: str, min_pitch: int, max_pitch: int):
+        """Log warnings if validated output still contains out-of-range notes"""
+        invalid = []
+        for line in output.split('\n'):
+            stripped = line.strip()
+            if not stripped or stripped == '.':
+                continue
+            for token in stripped.split(','):
+                token = token.strip()
+                if ':' not in token:
+                    continue
+                note_part = token.split(':', 1)[0].strip()
+                try:
+                    midi_num = TrackerParser.note_to_midi(note_part)
+                    if not (min_pitch <= midi_num <= max_pitch):
+                        invalid.append(note_part)
+                except Exception:
+                    invalid.append(note_part)
+
+        if invalid:
+            unique = ', '.join(sorted(set(invalid))[:5])
+            print(
+                f"  Warning: {instrument} output contains notes outside the target range."
+                f" Examples: {unique}"
+            )
 
 
 class ContinuousGenerator:
