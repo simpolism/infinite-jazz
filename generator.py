@@ -1,0 +1,336 @@
+"""
+Generation pipeline for real-time jazz quartet
+Orchestrates sequential LLM generation: bass → drums → piano → sax
+"""
+
+from typing import Dict, Optional, Tuple
+import re
+
+from llm_interface import LLMInterface, GenerationConfig
+from prompts import get_instrument_prompt
+from tracker_parser import parse_tracker, InstrumentTrack
+import config
+
+
+class GenerationPipeline:
+    """
+    Sequential generation pipeline for jazz quartet
+    Generates 2 bars at a time per instrument
+    """
+
+    GENERATION_ORDER = ['BASS', 'DRUMS', 'PIANO', 'SAX']
+
+    def __init__(self, llm: LLMInterface):
+        """
+        Initialize generation pipeline
+
+        Args:
+            llm: LLMInterface instance
+        """
+        self.llm = llm
+        self.history = []  # Track previous sections for continuity
+
+    def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
+        """
+        Generate one complete section (2 bars, all 4 instruments)
+
+        Args:
+            previous_context: Previous section for musical continuity
+
+        Returns:
+            Dict mapping instrument name to InstrumentTrack
+        """
+        print(f"\n{'='*60}")
+        print(f"Generating new section...")
+        if previous_context:
+            print(f"(Building on previous section)")
+        print(f"{'='*60}\n")
+
+        # Store generated parts for call-and-response
+        generated_parts = {}
+        generated_text = {}
+
+        # Generate each instrument in sequence
+        for instrument in self.GENERATION_ORDER:
+            print(f"\n[{instrument}]")
+
+            # Build prompt with previously generated parts
+            prompt = get_instrument_prompt(
+                instrument=instrument,
+                bass_part=generated_text.get('BASS', ''),
+                drums_part=generated_text.get('DRUMS', ''),
+                piano_part=generated_text.get('PIANO', ''),
+                previous_context=previous_context
+            )
+
+            # Generate
+            gen_config = GenerationConfig.get_config(instrument)
+            raw_output = self.llm.generate(prompt, **gen_config)
+
+            # Post-process and validate
+            cleaned_output = self._clean_output(raw_output, instrument)
+            validated_output = self._validate_output(cleaned_output, instrument)
+
+            # Store for next instrument
+            generated_text[instrument] = validated_output
+            print(f"\nGenerated {instrument}:")
+            print(validated_output[:200] + "..." if len(validated_output) > 200 else validated_output)
+
+        # Parse all parts together
+        full_tracker = self._assemble_tracker(generated_text)
+        tracks = parse_tracker(full_tracker)
+
+        # Update history
+        self.history.append(generated_text)
+        if len(self.history) > 2:
+            self.history.pop(0)  # Keep only last 2 sections
+
+        return tracks
+
+    def _clean_output(self, text: str, instrument: str) -> str:
+        """
+        Clean up LLM output
+        - Remove section headers if present
+        - Strip extra whitespace
+        - Remove markdown code blocks
+        """
+        # Remove markdown code blocks
+        text = re.sub(r'```[\w]*\n?', '', text)
+
+        # Remove section headers (BASS, DRUMS, etc.)
+        text = re.sub(r'^(BASS|DRUMS|PIANO|SAX)\s*\n?', '', text, flags=re.MULTILINE)
+
+        # Remove leading/trailing whitespace
+        text = text.strip()
+
+        # Ensure consistent line breaks
+        text = re.sub(r'\n\s*\n', '\n', text)
+
+        return text
+
+    def _validate_output(self, text: str, instrument: str) -> str:
+        """
+        Validate and fix common issues in generated output
+
+        Args:
+            text: Cleaned output text
+            instrument: Instrument name
+
+        Returns:
+            Validated and possibly corrected output
+        """
+        lines = text.split('\n')
+        expected_steps = config.get_total_steps()
+
+        # Check line count
+        if len(lines) < expected_steps:
+            print(f"  Warning: Expected {expected_steps} lines, got {len(lines)}. Padding with rests.")
+            while len(lines) < expected_steps:
+                lines.append('.')
+        elif len(lines) > expected_steps:
+            print(f"  Warning: Expected {expected_steps} lines, got {len(lines)}. Truncating.")
+            lines = lines[:expected_steps]
+
+        # Validate each line format
+        validated_lines = []
+        for i, line in enumerate(lines):
+            line = line.strip()
+
+            # Empty or rest
+            if not line or line == '.':
+                validated_lines.append('.')
+                continue
+
+            # Validate note format
+            try:
+                # Check if it matches NOTE:VELOCITY format
+                if self._is_valid_line(line):
+                    validated_lines.append(line)
+                else:
+                    print(f"  Warning: Invalid format at line {i+1}: '{line}'. Replacing with rest.")
+                    validated_lines.append('.')
+            except Exception as e:
+                print(f"  Warning: Error validating line {i+1}: {e}. Replacing with rest.")
+                validated_lines.append('.')
+
+        return '\n'.join(validated_lines)
+
+    def _is_valid_line(self, line: str) -> bool:
+        """Check if line matches valid tracker format"""
+        if line == '.':
+            return True
+
+        # Clean up common LLM mistakes before validation
+        line_clean = line.strip().rstrip('.,;')
+
+        # Check for note:velocity or chord format
+        # Allow trailing junk in velocity that will be cleaned by parser
+        pattern = r'^[A-G][#b]?-?\d+:\d+[^,]*(?:,[A-G][#b]?-?\d+:\d+[^,]*)*$'
+        return bool(re.match(pattern, line_clean))
+
+    def _assemble_tracker(self, generated_text: Dict[str, str]) -> str:
+        """
+        Assemble full tracker format from generated parts
+
+        Args:
+            generated_text: Dict mapping instrument to generated text
+
+        Returns:
+            Complete tracker format string
+        """
+        sections = []
+        for instrument in self.GENERATION_ORDER:
+            if instrument in generated_text:
+                sections.append(f"{instrument}\n{generated_text[instrument]}")
+
+        return '\n\n'.join(sections)
+
+    def get_previous_context(self) -> str:
+        """Get previous section for continuity"""
+        if not self.history:
+            return ""
+
+        # Return the last section
+        prev = self.history[-1]
+        return self._assemble_tracker(prev)
+
+
+class ContinuousGenerator:
+    """
+    Continuous generation with buffering for real-time playback
+    Generates ahead while current section plays
+    """
+
+    def __init__(self, llm: LLMInterface, buffer_size: int = 2):
+        """
+        Initialize continuous generator
+
+        Args:
+            llm: LLMInterface instance
+            buffer_size: Number of sections to buffer ahead
+        """
+        import threading
+
+        self.pipeline = GenerationPipeline(llm)
+        self.buffer_size = buffer_size
+        self.buffer = []
+        self.generation_lock = threading.Lock()
+        self.generation_thread = None
+
+    def prefill_buffer(self):
+        """Generate initial buffer of sections"""
+        print(f"Pre-filling buffer with {self.buffer_size} sections...\n")
+
+        for i in range(self.buffer_size):
+            context = self.pipeline.get_previous_context()
+            section = self.pipeline.generate_section(context)
+            self.buffer.append(section)
+            print(f"\nBuffered section {i+1}/{self.buffer_size}")
+
+    def get_next_section(self) -> Dict[str, InstrumentTrack]:
+        """
+        Get next section from buffer and start generating a new one asynchronously
+
+        Returns:
+            Dict mapping instrument to InstrumentTrack
+        """
+        if not self.buffer:
+            # Buffer empty, generate immediately (not ideal)
+            print("Warning: Buffer empty! Generating immediately...")
+            context = self.pipeline.get_previous_context()
+            return self.pipeline.generate_section(context)
+
+        # Pop from buffer
+        with self.generation_lock:
+            section = self.buffer.pop(0)
+
+        # Start generating new section in background (non-blocking!)
+        self._start_background_generation()
+
+        return section
+
+    def _start_background_generation(self):
+        """Start generating a new section in the background"""
+        import threading
+
+        # Only start if no generation is already happening
+        if self.generation_thread is not None and self.generation_thread.is_alive():
+            return
+
+        def generate():
+            context = self.pipeline.get_previous_context()
+            new_section = self.pipeline.generate_section(context)
+            with self.generation_lock:
+                self.buffer.append(new_section)
+
+        self.generation_thread = threading.Thread(target=generate)
+        self.generation_thread.daemon = True
+        self.generation_thread.start()
+
+    def has_buffered_sections(self) -> bool:
+        """Check if buffer has sections"""
+        return len(self.buffer) > 0
+
+
+def concatenate_sections(sections_list: list) -> Dict[str, InstrumentTrack]:
+    """
+    Concatenate multiple sections into one long track set
+
+    Args:
+        sections_list: List of track dicts (each from generate_section)
+
+    Returns:
+        Single track dict with all sections concatenated
+    """
+    if not sections_list:
+        return {}
+
+    # Start with empty tracks for each instrument
+    combined = {}
+
+    for instrument in GenerationPipeline.GENERATION_ORDER:
+        all_steps = []
+
+        # Concatenate steps from each section
+        for section in sections_list:
+            if instrument in section:
+                all_steps.extend(section[instrument].steps)
+
+        # Create combined track
+        if all_steps:
+            combined[instrument] = InstrumentTrack(
+                instrument=instrument,
+                steps=all_steps
+            )
+
+    return combined
+
+
+def save_generated_section(tracks: Dict[str, InstrumentTrack], filepath: str):
+    """
+    Save generated section to tracker file
+
+    Args:
+        tracks: Dict mapping instrument to InstrumentTrack
+        filepath: Output file path
+    """
+    sections = []
+    for instrument in GenerationPipeline.GENERATION_ORDER:
+        if instrument in tracks:
+            track = tracks[instrument]
+            lines = []
+            for step in track.steps:
+                if step.is_rest:
+                    lines.append('.')
+                else:
+                    notes = ','.join([f"{n.pitch}:{n.velocity}" for n in step.notes])
+                    lines.append(notes)
+
+            sections.append(f"{instrument}\n" + '\n'.join(lines))
+
+    output = '\n\n'.join(sections)
+
+    with open(filepath, 'w') as f:
+        f.write(output)
+
+    print(f"Saved to {filepath}")

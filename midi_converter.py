@@ -1,0 +1,238 @@
+"""
+MIDI converter: Converts tracker format to MIDI
+Supports configurable resolution and note duration modes
+"""
+
+import mido
+from typing import Dict, List
+from tracker_parser import InstrumentTrack, TrackerStep
+import config
+
+
+class MIDIConverter:
+    """Converts parsed tracker data to MIDI file or messages"""
+
+    def __init__(self, tempo: int = None):
+        """
+        Initialize MIDI converter
+        Args:
+            tempo: BPM (defaults to config.TEMPO)
+        """
+        self.tempo = tempo or config.TEMPO
+        self.ticks_per_step = config.get_ticks_per_step()
+
+    def create_midi_file(self, tracks: Dict[str, InstrumentTrack]) -> mido.MidiFile:
+        """
+        Convert tracker data to MIDI file
+        Args:
+            tracks: Dict mapping instrument name to InstrumentTrack
+        Returns:
+            mido.MidiFile object
+        """
+        mid = mido.MidiFile(ticks_per_beat=config.TICKS_PER_BEAT)
+
+        # Add tempo track
+        tempo_track = mido.MidiTrack()
+        mid.tracks.append(tempo_track)
+        tempo_track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(self.tempo)))
+
+        # Add each instrument track
+        for instrument_name, track_data in tracks.items():
+            midi_track = self._convert_track(instrument_name, track_data)
+            mid.tracks.append(midi_track)
+
+        return mid
+
+    def _convert_track(self, instrument_name: str, track_data: InstrumentTrack) -> mido.MidiTrack:
+        """
+        Convert a single instrument track to MIDI track
+        Args:
+            instrument_name: Name of instrument (BASS, DRUMS, PIANO, SAX)
+            track_data: InstrumentTrack object
+        Returns:
+            mido.MidiTrack
+        """
+        track = mido.MidiTrack()
+        channel = config.CHANNELS.get(instrument_name, 0)
+
+        # Add track name
+        track.append(mido.MetaMessage('track_name', name=instrument_name))
+
+        # Set program (instrument) - skip for drums
+        if instrument_name != 'DRUMS':
+            program = self._get_program(instrument_name)
+            track.append(mido.Message('program_change', program=program, channel=channel, time=0))
+
+        # Track active notes for sustain mode (future)
+        active_notes = set()
+
+        # Convert each step
+        current_time = 0  # Absolute time position in ticks
+
+        for step_idx, step in enumerate(track_data.steps):
+            step_start_time = step_idx * self.ticks_per_step
+
+            if config.NOTE_MODE == 'trigger':
+                # Trigger mode: note on, then note off after step duration
+                if not step.is_rest:
+                    # Note-on events at step start
+                    for note_idx, note in enumerate(step.notes):
+                        delta_time = step_start_time - current_time if note_idx == 0 else 0
+                        track.append(mido.Message(
+                            'note_on',
+                            note=note.pitch,
+                            velocity=note.velocity,
+                            channel=channel,
+                            time=delta_time
+                        ))
+                        if note_idx == 0:
+                            current_time = step_start_time
+
+                    # Note-off events after step duration
+                    note_off_time = step_start_time + self.ticks_per_step
+                    for note_idx, note in enumerate(step.notes):
+                        delta_time = note_off_time - current_time if note_idx == 0 else 0
+                        track.append(mido.Message(
+                            'note_off',
+                            note=note.pitch,
+                            velocity=0,
+                            channel=channel,
+                            time=delta_time
+                        ))
+                        if note_idx == 0:
+                            current_time = note_off_time
+                # For rests, we don't emit any events, time just advances
+
+            elif config.NOTE_MODE == 'sustain':
+                # Sustain mode: notes hold until next event
+                # Turn off any active notes
+                for note_pitch in active_notes:
+                    track.append(mido.Message(
+                        'note_off',
+                        note=note_pitch,
+                        velocity=0,
+                        channel=channel,
+                        time=time_offset
+                    ))
+                    time_offset = 0
+                active_notes.clear()
+
+                # Turn on new notes
+                if not step.is_rest:
+                    for note_idx, note in enumerate(step.notes):
+                        track.append(mido.Message(
+                            'note_on',
+                            note=note.pitch,
+                            velocity=note.velocity,
+                            channel=channel,
+                            time=time_offset if note_idx == 0 else 0
+                        ))
+                        time_offset = 0
+                        active_notes.add(note.pitch)
+
+        # Turn off any remaining active notes
+        for note_pitch in active_notes:
+            track.append(mido.Message(
+                'note_off',
+                note=note_pitch,
+                velocity=0,
+                channel=channel,
+                time=self.ticks_per_step
+            ))
+
+        # End of track
+        track.append(mido.MetaMessage('end_of_track', time=self.ticks_per_step))
+
+        return track
+
+    def _get_program(self, instrument_name: str) -> int:
+        """
+        Get General MIDI program number for instrument
+        Returns:
+            MIDI program number (0-127)
+        """
+        # General MIDI program numbers (0-indexed)
+        programs = {
+            'PIANO': 0,   # Acoustic Grand Piano
+            'BASS': 32,   # Acoustic Bass
+            'SAX': 65,    # Soprano Sax (can change to 66 for Alto, 67 for Tenor)
+        }
+        return programs.get(instrument_name, 0)
+
+    def create_realtime_messages(
+        self,
+        tracks: Dict[str, InstrumentTrack],
+        start_step: int = 0,
+        num_steps: int = None
+    ) -> List[tuple]:
+        """
+        Generate real-time MIDI messages for playback
+        Args:
+            tracks: Dict mapping instrument name to InstrumentTrack
+            start_step: Starting step index
+            num_steps: Number of steps to generate (None = all)
+        Returns:
+            List of (time_in_seconds, mido.Message) tuples
+        """
+        messages = []
+
+        # Calculate time per step in seconds
+        beats_per_second = self.tempo / 60.0
+        if config.RESOLUTION == '8th':
+            steps_per_beat = 2
+        else:  # 16th
+            steps_per_beat = 4
+
+        time_per_step = 1.0 / (beats_per_second * steps_per_beat)
+
+        # Generate messages for each instrument
+        for instrument_name, track_data in tracks.items():
+            channel = config.CHANNELS.get(instrument_name, 0)
+
+            # Set program change at t=0
+            if instrument_name != 'DRUMS':
+                program = self._get_program(instrument_name)
+                messages.append((0.0, mido.Message('program_change', program=program, channel=channel)))
+
+            # Determine step range
+            end_step = len(track_data.steps) if num_steps is None else start_step + num_steps
+            steps_to_process = track_data.steps[start_step:end_step]
+
+            # Generate note events
+            for step_idx, step in enumerate(steps_to_process):
+                absolute_step = start_step + step_idx
+                step_time = absolute_step * time_per_step
+
+                if not step.is_rest:
+                    # Note on
+                    for note in step.notes:
+                        messages.append((
+                            step_time,
+                            mido.Message('note_on', note=note.pitch, velocity=note.velocity, channel=channel)
+                        ))
+
+                    # Note off (for trigger mode)
+                    if config.NOTE_MODE == 'trigger':
+                        note_off_time = step_time + time_per_step
+                        for note in step.notes:
+                            messages.append((
+                                note_off_time,
+                                mido.Message('note_off', note=note.pitch, velocity=0, channel=channel)
+                            ))
+
+        # Sort by time
+        messages.sort(key=lambda x: x[0])
+        return messages
+
+
+def tracker_to_midi_file(tracks: Dict[str, InstrumentTrack], tempo: int = None) -> mido.MidiFile:
+    """
+    Convenience function: Convert tracker data to MIDI file
+    Args:
+        tracks: Dict mapping instrument name to InstrumentTrack
+        tempo: BPM (defaults to config.TEMPO)
+    Returns:
+        mido.MidiFile
+    """
+    converter = MIDIConverter(tempo=tempo)
+    return converter.create_midi_file(tracks)
