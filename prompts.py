@@ -62,7 +62,16 @@ Now generate a bassline. Output only the notes, starting immediately.
 def get_bass_prompt(previous_context: str = "") -> str:
     """Get bass generation prompt"""
     if previous_context:
-        return f"{BASS_SYSTEM_PROMPT}\n\nPREVIOUS SECTION:\n{previous_context}\n\nContinue the bass part:"
+        return f"""{BASS_SYSTEM_PROMPT}
+
+PREVIOUS SECTION:
+{previous_context}
+
+CRITICAL - AVOID REPETITION:
+Don't repeat the same walking patterns! Try new chord tones, different rhythms, varied motion.
+Jazz bass is about creativity - make this chorus fresh and different.
+
+Continue the bass part:"""
     return BASS_SYSTEM_PROMPT
 
 
@@ -108,6 +117,11 @@ def get_drums_prompt(bass_part: str, previous_context: str = "") -> str:
     context = f"BASS PART:\n{bass_part}\n\n"
     if previous_context:
         context += f"PREVIOUS SECTION:\n{previous_context}\n\n"
+        context += """CRITICAL - AVOID REPETITION:
+Don't play the same beat pattern again! Vary your fills, change up the ride pattern, add new accents.
+Keep the swing fresh - each chorus should groove differently.
+
+"""
     return f"{DRUMS_SYSTEM_PROMPT}\n\n{context}Generate drums:"
 
 
@@ -149,6 +163,11 @@ def get_piano_prompt(bass_part: str, drums_part: str, previous_context: str = ""
     context = f"BASS PART:\n{bass_part}\n\nDRUMS PART:\n{drums_part}\n\n"
     if previous_context:
         context += f"PREVIOUS SECTION:\n{previous_context}\n\n"
+        context += """CRITICAL - AVOID REPETITION:
+Don't comp the same voicings! Try different chord inversions, new rhythms, varied syncopation.
+Jazz piano is about harmonic imagination - surprise us with fresh voicings.
+
+"""
     return f"{PIANO_SYSTEM_PROMPT}\n\n{context}Generate piano:"
 
 
@@ -191,6 +210,12 @@ def get_sax_prompt(bass_part: str, drums_part: str, piano_part: str, previous_co
     context = f"BASS PART:\n{bass_part}\n\nDRUMS PART:\n{drums_part}\n\nPIANO PART:\n{piano_part}\n\n"
     if previous_context:
         context += f"PREVIOUS SECTION:\n{previous_context}\n\n"
+        context += """CRITICAL - AVOID REPETITION:
+Don't play the same melodic line! Develop NEW ideas - different phrases, contrasting shapes, varied rhythms.
+If you went up before, try going down. If you played fast runs, try space and long notes.
+Jazz improvisation is about telling a story with VARIETY - make each chorus distinct and interesting!
+
+"""
     return f"{SAX_SYSTEM_PROMPT}\n\n{context}Generate sax:"
 
 
@@ -321,9 +346,17 @@ E4:80
 """
 
     if previous_context:
-        prompt += f"\nPREVIOUS SECTION:\n{previous_context}\n\nContinue from where we left off. "
+        prompt += f"\nPREVIOUS SECTION:\n{previous_context}\n\n"
+        prompt += """CRITICAL - AVOID REPETITION:
+- DO NOT repeat the same patterns from the previous section!
+- Try NEW melodic ideas, different intervals, contrasting rhythms
+- Jazz is about VARIATION - each chorus should sound fresh
+- Mix it up: if you went up before, try going down now
+- Change your approach - surprise us!
 
-    prompt += "\nGenerate YOUR version now. Be creative with the sax! Format exactly like above. Start with 'BASS' then exactly 16 lines:"
+"""
+
+    prompt += "Generate YOUR version now. Be creative with the sax! Format exactly like above. Start with 'BASS' then exactly 16 lines:"
 
     return prompt
 
