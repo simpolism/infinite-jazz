@@ -63,7 +63,7 @@ class RealtimeJazzGenerator:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving outputs to {self.output_dir}")
 
-        self.generator = ContinuousGenerator(llm, batched=batched, verbose=verbose)  # Uses default buffer_size=2
+        self.generator = ContinuousGenerator(llm, batched=batched, verbose=verbose)  # Uses default buffer_size
         self.midi_converter = MIDIConverter(tempo=config.TEMPO)
 
         self.section_count = 0
@@ -171,12 +171,11 @@ class RealtimeJazzGenerator:
             current_time = 0.0  # Track absolute playback time
 
             # Pull ONLY the initial buffered sections (don't loop forever)
+            # Don't start background generation yet - wait until playback starts
             for _ in range(prefilled):
                 print(f"\n--- Section {section_num + 1} ---")
-                should_continue = (
-                    num_sections is None or (section_num + 1) < num_sections
-                )
-                tracks = self.generator.get_next_section(continue_buffering=should_continue)
+                # Don't refill buffer during initial load - we already prefilled it
+                tracks = self.generator.get_next_section(continue_buffering=False)
 
                 # Track section for final export
                 self.all_sections.append(tracks)

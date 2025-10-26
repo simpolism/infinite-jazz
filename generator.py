@@ -85,8 +85,9 @@ class GenerationPipeline:
         prompt = get_batched_quartet_prompt(previous_context)
 
         # Generate with higher token limit (need to fit all 4 instruments)
+        # Reasoning models need MUCH more tokens (they use tokens for internal reasoning)
         gen_config = {
-            'max_tokens': 1024,  # ~4x more tokens than single instrument
+            'max_tokens': 3000,  # High for reasoning models like gpt-oss-20b
             'temperature': 0.8,
             'top_p': 0.92,
             'repeat_penalty': 1.1,
@@ -371,7 +372,7 @@ class ContinuousGenerator:
     Generates ahead while current section plays
     """
 
-    def __init__(self, llm: LLMInterface, buffer_size: int = 2, batched: bool = True, verbose: bool = False):
+    def __init__(self, llm: LLMInterface, buffer_size: int = 4, batched: bool = True, verbose: bool = False):
         """
         Initialize continuous generator
 

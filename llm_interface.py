@@ -236,17 +236,29 @@ class OpenAIBackend:
         """Generate text from prompt"""
         start_time = time.time()
 
+        # Split prompt into system and user messages for better instruction following
+        system_msg, user_msg = self._split_prompt(prompt)
+
         # Note: OpenAI API doesn't support top_k or repeat_penalty
         # We'll use what's available
+        messages = [
+            {'role': 'system', 'content': system_msg},
+            {'role': 'user', 'content': user_msg}
+        ]
+
         completion_kwargs = {
             'model': self.model_name,
-            'messages': [
-                {'role': 'user', 'content': prompt}
-            ],
+            'messages': messages,
             'max_tokens': max_tokens,
             'temperature': temperature,
             'top_p': top_p,
         }
+
+        # For reasoning models, use low reasoning effort to save tokens for output
+        if 'reasoning_effort' not in kwargs:
+            completion_kwargs['reasoning_effort'] = 'low'
+        else:
+            completion_kwargs['reasoning_effort'] = kwargs['reasoning_effort']
 
         if stop:
             completion_kwargs['stop'] = stop
@@ -256,13 +268,71 @@ class OpenAIBackend:
         gen_time = time.time() - start_time
         text = response.choices[0].message.content
 
+        # Handle reasoning models (like gpt-oss) that may have reasoning field
+        if not text and hasattr(response.choices[0].message, 'reasoning'):
+            reasoning = response.choices[0].message.reasoning
+            if reasoning:
+                print(f"⚠️  Note: This appears to be a reasoning model. Content was empty but reasoning field had {len(reasoning)} chars.")
+                print(f"Reasoning preview: {reasoning[:100]}...")
+
         # Get token counts from usage
         tokens_generated = response.usage.completion_tokens
         tps = tokens_generated / gen_time if gen_time > 0 else 0
 
+        # Check if we hit token limit
+        if response.choices[0].finish_reason == 'length':
+            print(f"⚠️  WARNING: Hit token limit! Increase max_tokens (current: {max_tokens})")
+
         print(f"Generated {tokens_generated} tokens in {gen_time:.2f}s ({tps:.1f} tokens/sec)")
 
-        return text
+        return text or ""
+
+    def _split_prompt(self, prompt: str) -> tuple[str, str]:
+        """
+        Split prompt into system and user messages for better instruction following.
+
+        Strategy:
+        - System message: Instructions, format rules, examples
+        - User message: The actual generation request
+        """
+        # Look for common split points in our prompts
+        split_markers = [
+            "\nGenerate YOUR version now.",
+            "\nContinue the bass part:",
+            "\nGenerate drums:",
+            "\nGenerate piano:",
+            "\nGenerate sax:",
+            "Output only the notes, starting immediately."
+        ]
+
+        for marker in split_markers:
+            if marker in prompt:
+                parts = prompt.split(marker, 1)
+                system_msg = parts[0].strip()
+                user_msg = marker.strip() + (parts[1] if len(parts) > 1 else "")
+
+                # Add explicit start trigger to user message
+                if "Generate YOUR version now" in marker:
+                    user_msg += "\n\nStart your output with 'BASS' on the first line, then provide exactly 16 lines of notes:"
+                elif "Output only the notes" in marker:
+                    user_msg += "\n\nBegin outputting notes now:"
+
+                return system_msg, user_msg
+
+        # Fallback: if no marker found, split at "You are" / "Generate" boundary
+        # Put all instructions in system, minimal user message
+        if "You are a jazz" in prompt:
+            # Everything up to the last newline is system
+            lines = prompt.split('\n')
+            # Find the last substantial instruction line
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip() and not lines[i].strip().startswith('Generate'):
+                    system_msg = '\n'.join(lines[:i+1])
+                    user_msg = '\n'.join(lines[i+1:]).strip() or "Generate the music now in the specified format:"
+                    return system_msg, user_msg
+
+        # Last resort: entire prompt as system, simple user message
+        return prompt, "Generate the output in the exact format specified above. Start immediately with the first line of output:"
 
 
 class LLMInterface:
@@ -328,8 +398,10 @@ class GenerationConfig:
     """Configuration for music generation"""
 
     # Default generation parameters
+    # Note: High max_tokens values for reasoning models (like gpt-oss-20b)
+    # that use tokens for internal chain-of-thought
     BASS_CONFIG = {
-        'max_tokens': 256,
+        'max_tokens': 1000,  # Increased for reasoning models
         'temperature': 0.7,
         'top_p': 0.9,
         'repeat_penalty': 1.15,
@@ -337,7 +409,7 @@ class GenerationConfig:
     }
 
     DRUMS_CONFIG = {
-        'max_tokens': 256,
+        'max_tokens': 1000,  # Increased for reasoning models
         'temperature': 0.8,
         'top_p': 0.9,
         'repeat_penalty': 1.1,
@@ -345,7 +417,7 @@ class GenerationConfig:
     }
 
     PIANO_CONFIG = {
-        'max_tokens': 256,
+        'max_tokens': 1000,  # Increased for reasoning models
         'temperature': 0.75,
         'top_p': 0.92,
         'repeat_penalty': 1.12,
@@ -353,7 +425,7 @@ class GenerationConfig:
     }
 
     SAX_CONFIG = {
-        'max_tokens': 256,
+        'max_tokens': 1000,  # Increased for reasoning models
         'temperature': 0.85,
         'top_p': 0.95,
         'repeat_penalty': 1.1,

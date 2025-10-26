@@ -13,7 +13,7 @@ from prompts import get_batched_quartet_prompt, get_instrument_prompt
 import config
 
 
-def test_batched_prompt(llm: LLMInterface, previous_context: str = "", verbose: bool = False):
+def test_batched_prompt(llm: LLMInterface, previous_context: str = "", verbose: bool = False, debug: bool = False):
     """Test batched quartet generation prompt"""
 
     print(f"\n{'='*60}")
@@ -29,11 +29,24 @@ def test_batched_prompt(llm: LLMInterface, previous_context: str = "", verbose: 
         print(prompt)
         print(f"{'-'*60}\n")
 
+    # Show how prompt is split for OpenAI backend
+    if debug and hasattr(llm.backend, '_split_prompt'):
+        system_msg, user_msg = llm.backend._split_prompt(prompt)
+        print("DEBUG - MESSAGE SPLIT:")
+        print(f"{'-'*60}")
+        print(f"SYSTEM MESSAGE ({len(system_msg)} chars):")
+        print(system_msg[:500] + "..." if len(system_msg) > 500 else system_msg)
+        print(f"\n{'-'*60}")
+        print(f"USER MESSAGE ({len(user_msg)} chars):")
+        print(user_msg)
+        print(f"{'-'*60}\n")
+
     print("Sending to LLM...")
 
     # Generation config (same as used in generator.py)
+    # High max_tokens for reasoning models (like gpt-oss-20b)
     gen_config = {
-        'max_tokens': 1024,
+        'max_tokens': 3000,
         'temperature': 0.8,
         'top_p': 0.92,
         'repeat_penalty': 1.1,
@@ -60,7 +73,7 @@ def test_batched_prompt(llm: LLMInterface, previous_context: str = "", verbose: 
     analyze_output(raw_output, mode='batched')
 
 
-def test_instrument_prompt(llm: LLMInterface, instrument: str, verbose: bool = False):
+def test_instrument_prompt(llm: LLMInterface, instrument: str, verbose: bool = False, debug: bool = False):
     """Test single instrument generation prompt"""
 
     print(f"\n{'='*60}")
@@ -76,11 +89,24 @@ def test_instrument_prompt(llm: LLMInterface, instrument: str, verbose: bool = F
         print(prompt)
         print(f"{'-'*60}\n")
 
+    # Show how prompt is split for OpenAI backend
+    if debug and hasattr(llm.backend, '_split_prompt'):
+        system_msg, user_msg = llm.backend._split_prompt(prompt)
+        print("DEBUG - MESSAGE SPLIT:")
+        print(f"{'-'*60}")
+        print(f"SYSTEM MESSAGE ({len(system_msg)} chars):")
+        print(system_msg[:500] + "..." if len(system_msg) > 500 else system_msg)
+        print(f"\n{'-'*60}")
+        print(f"USER MESSAGE ({len(user_msg)} chars):")
+        print(user_msg)
+        print(f"{'-'*60}\n")
+
     print("Sending to LLM...")
 
     # Generation config (from llm_interface.py)
+    # High max_tokens for reasoning models (like gpt-oss-20b)
     gen_config = {
-        'max_tokens': 256,
+        'max_tokens': 1000,
         'temperature': 0.8,
         'top_p': 0.92,
         'repeat_penalty': 1.1,
@@ -283,6 +309,11 @@ Examples:
         help='Show full prompt before generation'
     )
     parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Show how prompt is split into system/user messages (OpenAI backend only)'
+    )
+    parser.add_argument(
         '--list-models',
         action='store_true',
         help='List available Ollama models and exit'
@@ -331,9 +362,9 @@ Examples:
 
     # Run test
     if args.mode == 'batched':
-        test_batched_prompt(llm, verbose=args.verbose)
+        test_batched_prompt(llm, verbose=args.verbose, debug=args.debug)
     else:
-        test_instrument_prompt(llm, args.instrument, verbose=args.verbose)
+        test_instrument_prompt(llm, args.instrument, verbose=args.verbose, debug=args.debug)
 
 
 if __name__ == '__main__':
