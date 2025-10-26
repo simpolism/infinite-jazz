@@ -299,6 +299,13 @@ Examples:
   # Use Ollama (easiest - auto-downloads model)
   python realtime_jazz.py -m qwen2.5:3b
 
+  # Use Groq for fast inference
+  python realtime_jazz.py --llm-backend openai -m llama-3.1-70b-versatile \\
+    --base-url https://api.groq.com/openai/v1 --api-key YOUR_GROQ_API_KEY
+
+  # Use OpenAI
+  python realtime_jazz.py --llm-backend openai -m gpt-3.5-turbo
+
   # Generate only 4 sections to test
   python realtime_jazz.py -m qwen2.5:3b -n 4
 
@@ -313,13 +320,21 @@ Examples:
     parser.add_argument(
         '-m', '--model',
         default='qwen2.5:3b',
-        help='Ollama model name (e.g., qwen2.5:3b, phi3:mini) or path to GGUF file (default: qwen2.5:3b)'
+        help='Model identifier: Ollama model name (e.g., qwen2.5:3b), GGUF file path, or OpenAI model name (e.g., gpt-3.5-turbo, llama-3.1-70b-versatile) (default: qwen2.5:3b)'
     )
     parser.add_argument(
         '--llm-backend',
-        choices=['auto', 'ollama', 'llama-cpp'],
+        choices=['auto', 'ollama', 'llama-cpp', 'openai'],
         default='auto',
         help='LLM backend to use (default: auto-detect)'
+    )
+    parser.add_argument(
+        '--api-key',
+        help='API key for OpenAI-compatible backend (defaults to OPENAI_API_KEY env var)'
+    )
+    parser.add_argument(
+        '--base-url',
+        help='Base URL for OpenAI-compatible API (e.g., https://api.groq.com/openai/v1)'
     )
     parser.add_argument(
         '--list-models',
@@ -421,6 +436,11 @@ Examples:
                 'n_gpu_layers': args.gpu_layers,
                 'verbose': False
             }
+        elif args.llm_backend == 'openai':
+            if args.api_key:
+                llm_kwargs['api_key'] = args.api_key
+            if args.base_url:
+                llm_kwargs['base_url'] = args.base_url
 
         llm = LLMInterface(
             model=args.model,
@@ -434,6 +454,8 @@ Examples:
         print("    Install: curl -fsSL https://ollama.com/install.sh | sh")
         print("    Start: ollama serve")
         print("  - For llama-cpp: Make sure model file exists")
+        print("  - For OpenAI/Groq: Make sure API key is set and base-url is correct")
+        print("    Set OPENAI_API_KEY env var or use --api-key")
         print("  - Use --list-models to see available Ollama models")
         sys.exit(1)
 

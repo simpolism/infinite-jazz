@@ -178,6 +178,93 @@ class LlamaCppBackend:
         return text
 
 
+class OpenAIBackend:
+    """OpenAI-compatible API backend - for OpenAI, Groq, etc."""
+
+    def __init__(
+        self,
+        model_name: str,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Initialize OpenAI-compatible backend
+
+        Args:
+            model_name: Model identifier (e.g., "gpt-3.5-turbo", "llama-3.1-70b-versatile")
+            api_key: API key (defaults to OPENAI_API_KEY env var)
+            base_url: Custom base URL (e.g., "https://api.groq.com/openai/v1")
+        """
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise ImportError(
+                "openai not installed. Install with:\n"
+                "  pip install openai\n"
+            )
+
+        self.model_name = model_name
+
+        # Initialize client with custom base_url if provided
+        client_kwargs = {}
+        if api_key:
+            client_kwargs['api_key'] = api_key
+        if base_url:
+            client_kwargs['base_url'] = base_url
+
+        self.client = OpenAI(**client_kwargs)
+
+        # Store base_url for display
+        self.base_url = base_url or "https://api.openai.com/v1"
+
+        print(f"✓ OpenAI-compatible API initialized")
+        print(f"  Endpoint: {self.base_url}")
+        print(f"  Model: {model_name}")
+
+    def generate(
+        self,
+        prompt: str,
+        max_tokens: int = 256,
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 40,
+        repeat_penalty: float = 1.1,
+        stop: Optional[list] = None,
+        **kwargs
+    ) -> str:
+        """Generate text from prompt"""
+        start_time = time.time()
+
+        # Note: OpenAI API doesn't support top_k or repeat_penalty
+        # We'll use what's available
+        completion_kwargs = {
+            'model': self.model_name,
+            'messages': [
+                {'role': 'user', 'content': prompt}
+            ],
+            'max_tokens': max_tokens,
+            'temperature': temperature,
+            'top_p': top_p,
+        }
+
+        if stop:
+            completion_kwargs['stop'] = stop
+
+        response = self.client.chat.completions.create(**completion_kwargs)
+
+        gen_time = time.time() - start_time
+        text = response.choices[0].message.content
+
+        # Get token counts from usage
+        tokens_generated = response.usage.completion_tokens
+        tps = tokens_generated / gen_time if gen_time > 0 else 0
+
+        print(f"Generated {tokens_generated} tokens in {gen_time:.2f}s ({tps:.1f} tokens/sec)")
+
+        return text
+
+
 class LLMInterface:
     """
     Unified LLM interface for music generation
@@ -197,8 +284,10 @@ class LLMInterface:
             model: Model identifier
                    For Ollama: model name (e.g., "qwen2.5:3b", "phi3:mini")
                    For llama.cpp: path to GGUF file
-            backend: "auto", "ollama", or "llama-cpp"
+                   For OpenAI: model name (e.g., "gpt-3.5-turbo", "llama-3.1-70b-versatile")
+            backend: "auto", "ollama", "llama-cpp", or "openai"
             **kwargs: Backend-specific options
+                      For OpenAI: api_key, base_url
         """
         self.backend_name = backend
         self.backend = None
@@ -221,6 +310,11 @@ class LLMInterface:
             print(f"Using llama-cpp-python backend")
             self.backend = LlamaCppBackend(model_path=model, **kwargs)
             self.backend_name = "llama-cpp"
+
+        elif backend == "openai":
+            print(f"Using OpenAI-compatible API backend")
+            self.backend = OpenAIBackend(model_name=model, **kwargs)
+            self.backend_name = "openai"
 
         else:
             raise ValueError(f"Unknown backend: {backend}")

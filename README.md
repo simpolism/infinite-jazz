@@ -24,6 +24,7 @@ AI-powered real-time jazz quartet using local LLMs and MIDI output.
 **LLM Backend:**
 - Primary: **Ollama** (easiest setup, great performance)
 - Alternative: llama-cpp-python (manual model management)
+- Alternative: **OpenAI-compatible APIs** (Groq, OpenAI, etc. for fast cloud inference)
 
 ## Tracker Format
 
@@ -122,6 +123,15 @@ python realtime_jazz.py --list-models
 
 # Hardware MIDI output (e.g., Yamaha TG-33)
 python realtime_jazz.py -m qwen2.5:3b --backend hardware --port "Your MIDI Device"
+
+# Use Groq for fast cloud inference (requires API key)
+export GROQ_API_KEY="your_groq_api_key"
+python realtime_jazz.py --llm-backend openai -m llama-3.1-70b-versatile \
+  --base-url https://api.groq.com/openai/v1 --api-key $GROQ_API_KEY -n 4
+
+# Use OpenAI GPT models (requires API key)
+export OPENAI_API_KEY="your_openai_api_key"
+python realtime_jazz.py --llm-backend openai -m gpt-3.5-turbo -n 4
 ```
 
 ### Test Without LLM
@@ -245,6 +255,7 @@ All audio backends implement `AudioBackend` interface:
 4. **LLM Backend**
    - Try different models (qwen2.5:3b, phi3:mini, llama3.2:3b)
    - Use llama-cpp-python for manual model management
+   - Use OpenAI-compatible APIs (Groq, OpenAI) for cloud inference
    - Adjust context window size
 
 ## Performance Targets
