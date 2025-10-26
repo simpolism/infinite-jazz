@@ -61,6 +61,7 @@ class FluidSynthBackend(AudioBackend):
                 '/usr/share/sounds/sf2/default.sf2',
                 '/usr/share/soundfonts/default.sf2',
                 '/usr/share/soundfonts/FluidR3_GM.sf2',
+                '/usr/share/soundfonts/GeneralUser.sf2',  # Arch/Manjaro
                 '/opt/homebrew/share/sound/default.sf2',  # macOS homebrew
             ]
 
