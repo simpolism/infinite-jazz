@@ -121,19 +121,30 @@ class RealtimeJazzGenerator:
         Returns:
             Tuple containing actual duration (seconds) and message count
         """
-        # Create MIDI file for this section
-        midi_file = self.midi_converter.create_midi_file(tracks)
+        # Use the faster create_realtime_messages method instead of creating a full MIDI file
+        messages = self.midi_converter.create_realtime_messages(tracks)
 
-        # Extract messages with timing
-        current_time = start_time
-        msg_count = 0
-        for message in midi_file.play():
-            self.midi_queue.put((current_time, message))
-            current_time += message.time
-            msg_count += 1
+        # Add messages to queue with adjusted timing
+        for relative_time, message in messages:
+            self.midi_queue.put((start_time + relative_time, message))
 
-        # Return actual duration
-        return current_time - start_time, msg_count
+        # Calculate actual duration based on number of steps, not last message
+        # (last message might not represent true duration if last step is a rest)
+        num_steps = len(next(iter(tracks.values())).steps) if tracks else 0
+        actual_duration = self._calculate_section_duration_from_steps(num_steps)
+
+        return actual_duration, len(messages)
+
+    def _calculate_section_duration_from_steps(self, num_steps: int) -> float:
+        """Calculate duration in seconds for a given number of steps"""
+        beats_per_second = config.TEMPO / 60.0
+        if config.RESOLUTION == '8th':
+            steps_per_beat = 2
+        else:  # 16th
+            steps_per_beat = 4
+
+        time_per_step = 1.0 / (beats_per_second * steps_per_beat)
+        return num_steps * time_per_step
 
     def run(self, num_sections: Optional[int] = None):
         """
@@ -246,16 +257,6 @@ class RealtimeJazzGenerator:
             print("\n\nStopping...")
         finally:
             self.cleanup()
-
-    def _calculate_section_duration(self) -> float:
-        """Calculate duration of one section in seconds"""
-        beats_per_bar = config.TIME_SIGNATURE[0]
-        bars = config.BARS_PER_GENERATION
-        total_beats = beats_per_bar * bars
-
-        # Duration = beats / (beats per second)
-        duration = total_beats / (config.TEMPO / 60.0)
-        return duration
 
     def cleanup(self):
         """Clean up resources"""
