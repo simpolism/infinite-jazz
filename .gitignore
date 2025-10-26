@@ -1,4 +1,3 @@
-output
 # Python
 __pycache__/
 *.py[cod]
@@ -38,6 +37,7 @@ venv/
 # MIDI files
 *.mid
 *.midi
+output*
 
 # LLM models
 models/

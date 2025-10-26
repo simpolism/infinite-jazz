@@ -105,30 +105,37 @@ class MIDIConverter:
 
             elif config.NOTE_MODE == 'sustain':
                 # Sustain mode: notes hold until next event
-                # Turn off any active notes
-                for note_pitch in active_notes:
-                    track.append(mido.Message(
-                        'note_off',
-                        note=note_pitch,
-                        velocity=0,
-                        channel=channel,
-                        time=time_offset
-                    ))
-                    time_offset = 0
-                active_notes.clear()
+                time_offset = max(0, step_start_time - current_time)
+                first_delta = True
 
-                # Turn on new notes
+                if active_notes:
+                    for note_pitch in list(active_notes):
+                        delta_time = time_offset if first_delta else 0
+                        track.append(mido.Message(
+                            'note_off',
+                            note=note_pitch,
+                            velocity=0,
+                            channel=channel,
+                            time=delta_time
+                        ))
+                        first_delta = False
+                    active_notes.clear()
+
                 if not step.is_rest:
                     for note_idx, note in enumerate(step.notes):
+                        delta_time = time_offset if first_delta and note_idx == 0 else 0
                         track.append(mido.Message(
                             'note_on',
                             note=note.pitch,
                             velocity=note.velocity,
                             channel=channel,
-                            time=time_offset if note_idx == 0 else 0
+                            time=delta_time
                         ))
-                        time_offset = 0
+                        first_delta = False
                         active_notes.add(note.pitch)
+
+                if not first_delta:
+                    current_time = step_start_time
 
         # Turn off any remaining active notes
         for note_pitch in active_notes:
@@ -141,7 +148,7 @@ class MIDIConverter:
             ))
 
         # End of track
-        track.append(mido.MetaMessage('end_of_track', time=self.ticks_per_step))
+        track.append(mido.MetaMessage('end_of_track', time=0))
 
         return track
 

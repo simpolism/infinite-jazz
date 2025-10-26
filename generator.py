@@ -20,7 +20,7 @@ class GenerationPipeline:
 
     GENERATION_ORDER = ['BASS', 'DRUMS', 'PIANO', 'SAX']
 
-    def __init__(self, llm: LLMInterface):
+    def __init__(self, llm: LLMInterface, verbose: bool = False):
         """
         Initialize generation pipeline
 
@@ -29,6 +29,7 @@ class GenerationPipeline:
         """
         self.llm = llm
         self.history = []  # Track previous sections for continuity
+        self.verbose = verbose
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -40,11 +41,12 @@ class GenerationPipeline:
         Returns:
             Dict mapping instrument name to InstrumentTrack
         """
-        print(f"\n{'='*60}")
-        print(f"Generating new section...")
-        if previous_context:
-            print(f"(Building on previous section)")
-        print(f"{'='*60}\n")
+        if self.verbose:
+            print(f"\n{'='*60}")
+            print("Generating new section...")
+            if previous_context:
+                print("(Building on previous section)")
+            print(f"{'='*60}\n")
 
         # Store generated parts for call-and-response
         generated_parts = {}
@@ -52,7 +54,8 @@ class GenerationPipeline:
 
         # Generate each instrument in sequence
         for instrument in self.GENERATION_ORDER:
-            print(f"\n[{instrument}]")
+            if self.verbose:
+                print(f"\n[{instrument}]")
 
             # Build prompt with previously generated parts
             prompt = get_instrument_prompt(
@@ -73,8 +76,9 @@ class GenerationPipeline:
 
             # Store for next instrument
             generated_text[instrument] = validated_output
-            print(f"\nGenerated {instrument}:")
-            print(validated_output[:200] + "..." if len(validated_output) > 200 else validated_output)
+            if self.verbose:
+                print(f"\nGenerated {instrument}:")
+                print(validated_output[:200] + "..." if len(validated_output) > 200 else validated_output)
 
         # Parse all parts together
         full_tracker = self._assemble_tracker(generated_text)
@@ -201,7 +205,7 @@ class ContinuousGenerator:
     Generates ahead while current section plays
     """
 
-    def __init__(self, llm: LLMInterface, buffer_size: int = 2):
+    def __init__(self, llm: LLMInterface, buffer_size: int = 2, verbose: bool = False):
         """
         Initialize continuous generator
 
@@ -211,23 +215,32 @@ class ContinuousGenerator:
         """
         import threading
 
-        self.pipeline = GenerationPipeline(llm)
+        self.pipeline = GenerationPipeline(llm, verbose=verbose)
         self.buffer_size = buffer_size
         self.buffer = []
         self.generation_lock = threading.Lock()
         self.generation_thread = None
+        self.verbose = verbose
 
-    def prefill_buffer(self):
+    def prefill_buffer(self, count: Optional[int] = None):
         """Generate initial buffer of sections"""
-        print(f"Pre-filling buffer with {self.buffer_size} sections...\n")
+        target = self.buffer_size if count is None else max(0, min(count, self.buffer_size))
+        if target <= 0:
+            return 0
 
-        for i in range(self.buffer_size):
+        if self.verbose:
+            print(f"Pre-filling buffer with {target} sections...\n")
+
+        for i in range(target):
             context = self.pipeline.get_previous_context()
             section = self.pipeline.generate_section(context)
             self.buffer.append(section)
-            print(f"\nBuffered section {i+1}/{self.buffer_size}")
+            if self.verbose:
+                print(f"\nBuffered section {i+1}/{target}")
 
-    def get_next_section(self) -> Dict[str, InstrumentTrack]:
+        return target
+
+    def get_next_section(self, continue_buffering: bool = True) -> Dict[str, InstrumentTrack]:
         """
         Get next section from buffer and start generating a new one asynchronously
 
@@ -244,8 +257,9 @@ class ContinuousGenerator:
         with self.generation_lock:
             section = self.buffer.pop(0)
 
-        # Start generating new section in background (non-blocking!)
-        self._start_background_generation()
+        # Start generating new section in background when more sections are needed
+        if continue_buffering:
+            self._start_background_generation()
 
         return section
 

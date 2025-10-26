@@ -8,6 +8,7 @@ import argparse
 import sys
 import time
 import threading
+from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
 from typing import Optional
@@ -35,7 +36,8 @@ class RealtimeJazzGenerator:
         llm: LLMInterface,
         audio_backend,
         save_output: bool = False,
-        output_dir: str = "output"
+        output_dir: str = "output",
+        verbose: bool = False
     ):
         """
         Initialize real-time jazz generator
@@ -50,11 +52,15 @@ class RealtimeJazzGenerator:
         self.audio_backend = audio_backend
         self.save_output = save_output
         self.output_dir = Path(output_dir)
+        self.verbose = verbose
+
+        self.run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
         if self.save_output:
-            self.output_dir.mkdir(exist_ok=True)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Saving outputs to {self.output_dir}")
 
-        self.generator = ContinuousGenerator(llm)  # Uses default buffer_size=2, generates async
+        self.generator = ContinuousGenerator(llm, verbose=verbose)  # Uses default buffer_size=2, generates async
         self.midi_converter = MIDIConverter(tempo=config.TEMPO)
 
         self.section_count = 0
@@ -110,7 +116,7 @@ class RealtimeJazzGenerator:
             start_time: Absolute start time for this section (in seconds)
 
         Returns:
-            Actual duration of the section (in seconds)
+            Tuple containing actual duration (seconds) and message count
         """
         # Create MIDI file for this section
         midi_file = self.midi_converter.create_midi_file(tracks)
@@ -123,10 +129,8 @@ class RealtimeJazzGenerator:
             current_time += message.time
             msg_count += 1
 
-        print(f"  Added {msg_count} MIDI messages to queue (duration: {current_time - start_time:.2f}s)")
-
         # Return actual duration
-        return current_time - start_time
+        return current_time - start_time, msg_count
 
     def run(self, num_sections: Optional[int] = None):
         """
@@ -143,31 +147,44 @@ class RealtimeJazzGenerator:
         print(f"Bars per section: {config.BARS_PER_GENERATION}")
         print(f"{'='*60}\n")
 
+        if num_sections is not None and num_sections <= 0:
+            print("No sections requested; exiting.")
+            return
+
         try:
             # Pre-fill buffer
             print("Pre-generating initial sections...\n")
             buffer_size = self.generator.buffer_size
-            self.generator.prefill_buffer()
+            if num_sections is None:
+                initial_prefill = buffer_size
+            else:
+                initial_prefill = min(buffer_size, num_sections)
+
+            prefilled = self.generator.prefill_buffer(count=initial_prefill) or 0
 
             # Pre-load all buffered sections into queue BEFORE starting playback
-            print(f"Pre-loading {buffer_size} buffered sections into playback queue...")
+            print(f"Pre-loading {prefilled} buffered sections into playback queue...")
             section_num = 0
             current_time = 0.0  # Track absolute playback time
 
             # Pull ONLY the initial buffered sections (don't loop forever)
-            for _ in range(buffer_size):
+            for _ in range(prefilled):
                 print(f"\n--- Section {section_num + 1} ---")
-                tracks = self.generator.get_next_section()
+                should_continue = (
+                    num_sections is None or (section_num + 1) < num_sections
+                )
+                tracks = self.generator.get_next_section(continue_buffering=should_continue)
 
-                # Save section
+                # Track section for final export
                 self.all_sections.append(tracks)
-                if self.save_output:
-                    output_file = self.output_dir / f"section_{section_num:04d}.txt"
-                    save_generated_section(tracks, str(output_file))
 
                 # Add MIDI messages to queue and get actual duration
                 print(f"Queueing section {section_num + 1} for playback...")
-                actual_duration = self._add_section_to_queue(tracks, current_time)
+                actual_duration, msg_count = self._add_section_to_queue(tracks, current_time)
+                if self.verbose:
+                    print(f"  Added {msg_count} MIDI messages (duration {actual_duration:.2f}s)")
+                else:
+                    print(f"  Section duration {actual_duration:.2f}s")
 
                 # Advance time for next section (use actual MIDI duration)
                 current_time += actual_duration
@@ -195,17 +212,21 @@ class RealtimeJazzGenerator:
 
                 # Get next section (this will block until generation is ready)
                 print(f"\n--- Section {section_num + 1} ---")
-                tracks = self.generator.get_next_section()
+                should_continue = (
+                    num_sections is None or (section_num + 1) < num_sections
+                )
+                tracks = self.generator.get_next_section(continue_buffering=should_continue)
 
-                # Save section
+                # Track section for final export
                 self.all_sections.append(tracks)
-                if self.save_output:
-                    output_file = self.output_dir / f"section_{section_num:04d}.txt"
-                    save_generated_section(tracks, str(output_file))
 
                 # Add MIDI messages to queue and get actual duration
                 print(f"Queueing section {section_num + 1} for playback...")
-                actual_duration = self._add_section_to_queue(tracks, current_time)
+                actual_duration, msg_count = self._add_section_to_queue(tracks, current_time)
+                if self.verbose:
+                    print(f"  Added {msg_count} MIDI messages (duration {actual_duration:.2f}s)")
+                else:
+                    print(f"  Section duration {actual_duration:.2f}s")
 
                 # Advance time for next section (use actual MIDI duration)
                 current_time += actual_duration
@@ -255,14 +276,13 @@ class RealtimeJazzGenerator:
             # Convert to MIDI
             midi_file = self.midi_converter.create_midi_file(combined_tracks)
 
-            # Save
-            output_file = self.output_dir / "complete.mid"
-            midi_file.save(str(output_file))
-            print(f"✓ Saved complete MIDI: {output_file}")
+            # Save with timestamped filenames
+            midi_file_path = self.output_dir / f"complete_{self.run_timestamp}.mid"
+            midi_file.save(str(midi_file_path))
+            print(f"✓ Saved complete MIDI: {midi_file_path}")
 
-            # Also save complete tracker text
-            txt_file = self.output_dir / "complete.txt"
-            save_generated_section(combined_tracks, str(txt_file))
+            txt_file_path = self.output_dir / f"complete_{self.run_timestamp}.txt"
+            save_generated_section(combined_tracks, str(txt_file_path))
 
         print("Done!")
 
@@ -355,6 +375,11 @@ Examples:
         default=2048,
         help='Context window size (default: 2048)'
     )
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Enable verbose logging for debugging'
+    )
 
     args = parser.parse_args()
 
@@ -429,7 +454,8 @@ Examples:
         llm=llm,
         audio_backend=backend,
         save_output=args.save_output,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        verbose=args.verbose
     )
 
     generator.run(num_sections=args.num_sections)
