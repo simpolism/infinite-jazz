@@ -7,27 +7,31 @@ from typing import Dict, Optional, Tuple
 import re
 
 from llm_interface import LLMInterface, GenerationConfig
-from prompts import get_instrument_prompt
+from prompts import get_instrument_prompt, get_batched_quartet_prompt
 from tracker_parser import parse_tracker, InstrumentTrack, TrackerParser
 import config
 
 
 class GenerationPipeline:
     """
-    Sequential generation pipeline for jazz quartet
-    Generates 2 bars at a time per instrument
+    Generation pipeline for jazz quartet
+    Supports both sequential (bass→drums→piano→sax) and batched (all at once) generation
     """
 
     GENERATION_ORDER = ['BASS', 'DRUMS', 'PIANO', 'SAX']
 
-    def __init__(self, llm: LLMInterface, verbose: bool = False):
+    def __init__(self, llm: LLMInterface, batched: bool = True, verbose: bool = False):
         """
         Initialize generation pipeline
 
         Args:
             llm: LLMInterface instance
+            batched: If True, generate all instruments in one LLM call (faster, more creative)
+                    If False, generate sequentially with call-and-response
+            verbose: Print generation details
         """
         self.llm = llm
+        self.batched = batched
         self.history = []  # Track previous sections for continuity
         self.verbose = verbose
 
@@ -43,11 +47,71 @@ class GenerationPipeline:
         """
         if self.verbose:
             print(f"\n{'='*60}")
-            print("Generating new section...")
+            print(f"Generating new section ({'batched' if self.batched else 'sequential'})...")
             if previous_context:
                 print("(Building on previous section)")
             print(f"{'='*60}\n")
 
+        if self.batched:
+            generated_text = self._generate_batched(previous_context)
+        else:
+            generated_text = self._generate_sequential(previous_context)
+
+        # Parse all parts together
+        full_tracker = self._assemble_tracker(generated_text)
+        tracks = parse_tracker(full_tracker)
+
+        # Update history
+        self.history.append(generated_text)
+        if len(self.history) > 2:
+            self.history.pop(0)  # Keep only last 2 sections
+
+        return tracks
+
+    def _generate_batched(self, previous_context: str = "") -> Dict[str, str]:
+        """
+        Generate all instruments in a single LLM call
+
+        Args:
+            previous_context: Previous section for musical continuity
+
+        Returns:
+            Dict mapping instrument name to generated text
+        """
+        if self.verbose:
+            print("[BATCHED GENERATION]")
+
+        # Build batched prompt
+        prompt = get_batched_quartet_prompt(previous_context)
+
+        # Generate with higher token limit (need to fit all 4 instruments)
+        gen_config = {
+            'max_tokens': 1024,  # ~4x more tokens than single instrument
+            'temperature': 0.8,
+            'top_p': 0.92,
+            'repeat_penalty': 1.1,
+        }
+
+        raw_output = self.llm.generate(prompt, **gen_config)
+
+        if self.verbose:
+            print(f"\nRaw output length: {len(raw_output)} chars")
+
+        # Parse out each instrument section
+        generated_text = self._parse_batched_output(raw_output)
+
+        return generated_text
+
+    def _generate_sequential(self, previous_context: str = "") -> Dict[str, str]:
+        """
+        Generate instruments sequentially (bass→drums→piano→sax)
+
+        Args:
+            previous_context: Previous section for musical continuity
+
+        Returns:
+            Dict mapping instrument name to generated text
+        """
         # Store generated parts for call-and-response
         generated_text = {}
 
@@ -76,16 +140,60 @@ class GenerationPipeline:
                 print(f"\nGenerated {instrument}:")
                 print(validated_output[:200] + "..." if len(validated_output) > 200 else validated_output)
 
-        # Parse all parts together
-        full_tracker = self._assemble_tracker(generated_text)
-        tracks = parse_tracker(full_tracker)
+        return generated_text
 
-        # Update history
-        self.history.append(generated_text)
-        if len(self.history) > 2:
-            self.history.pop(0)  # Keep only last 2 sections
+    def _parse_batched_output(self, raw_output: str) -> Dict[str, str]:
+        """
+        Parse batched generation output to extract each instrument's section
 
-        return tracks
+        Args:
+            raw_output: Raw LLM output containing all instruments
+
+        Returns:
+            Dict mapping instrument name to generated text
+        """
+        generated_text = {}
+
+        # Remove markdown formatting
+        cleaned = re.sub(r'\*\*([A-Z]+)\*\*', r'\1', raw_output)
+        cleaned = re.sub(r'```[\w]*\n?', '', cleaned)
+
+        # Split by instrument headers
+        for i, instrument in enumerate(self.GENERATION_ORDER):
+            # Find this instrument's section
+            pattern = rf'^{instrument}\s*$'
+            matches = list(re.finditer(pattern, cleaned, re.MULTILINE))
+
+            if not matches:
+                if self.verbose:
+                    print(f"  Warning: Could not find {instrument} section in output")
+                generated_text[instrument] = '.' * config.get_total_steps()
+                continue
+
+            # Get content between this instrument and the next
+            start = matches[0].end()
+
+            # Find where this section ends (next instrument header or end of text)
+            if i < len(self.GENERATION_ORDER) - 1:
+                next_instrument = self.GENERATION_ORDER[i + 1]
+                next_pattern = rf'^{next_instrument}\s*$'
+                next_matches = list(re.finditer(next_pattern, cleaned, re.MULTILINE))
+                end = next_matches[0].start() if next_matches else len(cleaned)
+            else:
+                end = len(cleaned)
+
+            # Extract and clean the section
+            section = cleaned[start:end].strip()
+            cleaned_section = self._clean_output(section, instrument)
+            validated_section = self._validate_output(cleaned_section, instrument)
+
+            generated_text[instrument] = validated_section
+
+            if self.verbose:
+                print(f"\n[{instrument}]")
+                print(validated_section[:200] + "..." if len(validated_section) > 200 else validated_section)
+
+        return generated_text
 
     def _clean_output(self, text: str, instrument: str) -> str:
         """
@@ -249,17 +357,19 @@ class ContinuousGenerator:
     Generates ahead while current section plays
     """
 
-    def __init__(self, llm: LLMInterface, buffer_size: int = 2, verbose: bool = False):
+    def __init__(self, llm: LLMInterface, buffer_size: int = 2, batched: bool = True, verbose: bool = False):
         """
         Initialize continuous generator
 
         Args:
             llm: LLMInterface instance
             buffer_size: Number of sections to buffer ahead
+            batched: If True, generate all instruments in one LLM call (faster)
+            verbose: Print generation details
         """
         import threading
 
-        self.pipeline = GenerationPipeline(llm, verbose=verbose)
+        self.pipeline = GenerationPipeline(llm, batched=batched, verbose=verbose)
         self.buffer_size = buffer_size
         self.buffer = []
         self.generation_lock = threading.Lock()

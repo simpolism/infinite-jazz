@@ -37,6 +37,7 @@ class RealtimeJazzGenerator:
         audio_backend,
         save_output: bool = False,
         output_dir: str = "output",
+        batched: bool = True,
         verbose: bool = False
     ):
         """
@@ -47,6 +48,8 @@ class RealtimeJazzGenerator:
             audio_backend: AudioBackend instance
             save_output: Save generated sections to files
             output_dir: Directory for saved output
+            batched: Use batched generation (all instruments at once)
+            verbose: Print generation details
         """
         self.llm = llm
         self.audio_backend = audio_backend
@@ -60,7 +63,7 @@ class RealtimeJazzGenerator:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving outputs to {self.output_dir}")
 
-        self.generator = ContinuousGenerator(llm, verbose=verbose)  # Uses default buffer_size=2, generates async
+        self.generator = ContinuousGenerator(llm, batched=batched, verbose=verbose)  # Uses default buffer_size=2
         self.midi_converter = MIDIConverter(tempo=config.TEMPO)
 
         self.section_count = 0
@@ -380,6 +383,11 @@ Examples:
         action='store_true',
         help='Enable verbose logging for debugging'
     )
+    parser.add_argument(
+        '--sequential',
+        action='store_true',
+        help='Use sequential generation (bass→drums→piano→sax) instead of batched (default: batched)'
+    )
 
     args = parser.parse_args()
 
@@ -455,6 +463,7 @@ Examples:
         audio_backend=backend,
         save_output=args.save_output,
         output_dir=args.output_dir,
+        batched=not args.sequential,  # Default to batched unless --sequential is passed
         verbose=args.verbose
     )
 

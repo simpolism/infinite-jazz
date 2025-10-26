@@ -196,6 +196,138 @@ def get_sax_prompt(bass_part: str, drums_part: str, piano_part: str, previous_co
 
 # Prompt builder functions
 
+# BATCHED QUARTET PROMPT
+
+def get_batched_quartet_prompt(previous_context: str = "") -> str:
+    """
+    Get prompt for generating all 4 instruments in a single generation
+
+    Args:
+        previous_context: Previous section for musical continuity
+
+    Returns:
+        Formatted prompt string for batched generation
+    """
+    steps = config.get_total_steps()
+    resolution = config.RESOLUTION
+    bars = config.BARS_PER_GENERATION
+
+    prompt = f"""You are a jazz quartet generating {bars} bars of music. Output all 4 instruments in tracker format.
+
+FORMAT RULES:
+- {steps} lines per instrument (one line = one {resolution} note)
+- Each line: NOTE:VELOCITY (e.g., C2:80) or . (rest)
+- Chords: Multiple notes on same line (e.g., C3:65,E3:62,G3:60)
+- Velocity: 0-127 (60-90 typical for jazz)
+
+INSTRUMENT ROLES:
+
+BASS - Walking bassline foundation
+- Range: E1 to G2 (low register)
+- Stepwise motion connecting chord tones
+- Emphasize roots on strong beats
+- Velocity: 70-85
+
+DRUMS - Swing rhythm (General MIDI drum map)
+- C2: Kick | D2: Snare | F#2: Hi-hat | D#3: Ride cymbal
+- Velocity: Kick/Snare 85-95, Cymbals 50-70
+
+PIANO - Chord comping
+- Range: C3 to C5
+- Jazz voicings (7ths, 9ths), syncopated rhythm
+- Leave space - don't play every beat
+- Velocity: 60-75
+
+SAX - Lead melody and improvisation
+- MONOPHONIC: ONE note per line (saxes can't play chords!)
+- Range: A3 to F5
+- Be creative! Vary intervals, use space (rests), tell a story
+- Think bebop lines, unexpected turns, melodic phrases
+- Velocity: 70-90, accents up to 100
+
+COMPLETE EXAMPLE:
+
+BASS
+C2:80
+.
+E2:75
+.
+G2:75
+.
+A2:70
+.
+C2:80
+.
+B1:75
+.
+A1:75
+.
+G1:70
+.
+
+DRUMS
+C2:90,D#3:60
+D#3:50
+D2:85,D#3:60
+D#3:50
+C2:85,D#3:60
+D#3:50
+D2:90,D#3:65
+D#3:50
+C2:90,D#3:60
+D#3:50
+D2:85,D#3:60
+D#3:50
+C2:85,D#3:60
+D#3:50
+D2:90,D#3:65
+C2:75
+
+PIANO
+C3:65,E3:60,G3:62
+.
+.
+.
+E3:68,G3:65,B3:62
+.
+.
+C3:65,E3:62,B3:60
+.
+.
+.
+G3:65,B3:62,D4:58
+.
+.
+.
+.
+
+SAX
+.
+.
+E4:75
+G4:80
+A4:85
+G4:75
+F4:70
+E4:75
+D4:70
+C4:75
+.
+.
+D4:80
+F4:75
+E4:80
+.
+"""
+
+    if previous_context:
+        prompt += f"\nPREVIOUS SECTION:\n{previous_context}\n\nContinue from where we left off. "
+
+    prompt += "\nGenerate YOUR version now. Be creative with the sax! Format exactly like above. Start with 'BASS' then exactly 16 lines:"
+
+    return prompt
+
+
 def get_instrument_prompt(
     instrument: str,
     bass_part: str = "",

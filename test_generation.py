@@ -23,8 +23,11 @@ class MockLLM:
         """Generate mock output based on instrument"""
         self.generation_count += 1
 
-        # Detect instrument from prompt
-        if 'bassist' in prompt.lower():
+        # Detect if this is a batched quartet prompt
+        if 'quartet' in prompt.lower() and 'all 4 instruments' in prompt.lower():
+            return self._generate_batched_quartet()
+        # Detect individual instrument from prompt
+        elif 'bassist' in prompt.lower():
             return self._generate_bass()
         elif 'drummer' in prompt.lower():
             return self._generate_drums()
@@ -98,6 +101,81 @@ G2:65,B2:60,D3:62
     def _generate_sax(self) -> str:
         """Mock sax generation"""
         return """.
+.
+E4:70
+G4:75
+A4:80
+G4:70
+F4:75
+E4:70
+D4:65
+.
+.
+C4:70
+D4:75
+.
+B3:80
+.
+"""
+
+    def _generate_batched_quartet(self) -> str:
+        """Mock batched quartet generation (all 4 instruments)"""
+        return """BASS
+C2:80
+.
+C2:75
+.
+F2:80
+.
+F2:75
+.
+C2:80
+.
+C2:75
+.
+G2:80
+.
+G2:75
+.
+
+DRUMS
+C2:90,F#2:60
+F#2:50
+C2:75,F#2:60
+F#2:50
+C2:90,F#2:60
+F#2:50
+D2:85,F#2:60
+F#2:50
+C2:90,F#2:60
+F#2:50
+C2:75,F#2:60
+F#2:50
+C2:90,F#2:60
+F#2:50
+D2:85,F#2:60
+F#2:50
+
+PIANO
+C3:65,E3:60,G3:62
+.
+.
+.
+F3:65,A3:60,C4:62
+.
+.
+.
+C3:65,E3:60,G3:62
+.
+.
+.
+G2:65,B2:60,D3:62
+.
+.
+.
+
+SAX
+.
 .
 E4:70
 G4:75
