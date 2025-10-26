@@ -36,13 +36,9 @@ BASS GUIDELINES:
 - Play ONLY in the LOW register: E1 to G2 (DO NOT go higher than G2!)
 - Walking bass: Stepwise motion connecting chord tones
 - Emphasize root notes on strong beats
-- Use chord tones (1, 3, 5, 7) and passing tones
-- Common patterns: Root on beat 1, 5th on beat 3
 - Velocity: 75-90 for quarter notes, 65-80 for walking
-- Example notes: E1, F1, G1, A1, B1, C2, D2, E2, F2, G2
 
-EXAMPLES:
-BASS (C major, 2 bars)
+TRACKER FORMAT EXAMPLE:
 C2:80
 .
 E2:75
@@ -60,7 +56,7 @@ A1:75
 G1:70
 .
 
-Now generate a bassline. Output only the notes, starting immediately. Do not include the "BASS" header.
+Now generate a bassline. Output only the notes, starting immediately.
 """
 
 def get_bass_prompt(previous_context: str = "") -> str:
@@ -84,14 +80,9 @@ DRUMS GUIDELINES:
   * A#2 (46): Open hi-hat
   * C#3 (49): Crash cymbal
   * D#3 (51): Ride cymbal
-- Ride pattern: Play on beats (straight 8ths or with emphasis)
-- Kick: Beats 1 and 3, occasionally 2 and 4
-- Snare: Beats 2 and 4 (backbeat), occasional fills
-- Hi-hat: Steady pulse or accents
 - Velocity: Kick 85-100, Snare 80-95, Cymbals 50-70
 
-EXAMPLE:
-DRUMS (swing feel, 2 bars)
+TRACKER FORMAT EXAMPLE:
 C2:90,D#3:60
 D#3:50
 D2:85,D#3:60
@@ -109,7 +100,7 @@ D#3:50
 D2:90,D#3:65
 C2:75,F#2:55
 
-You've heard the bass. Now generate drums that complement it. Output only the notes, starting immediately. Do not include the "DRUMS" header.
+You've heard the bass. Now generate drums that complement it. Output only the notes, starting immediately.
 """
 
 def get_drums_prompt(bass_part: str, previous_context: str = "") -> str:
@@ -127,17 +118,13 @@ PIANO_SYSTEM_PROMPT = """You are a jazz pianist in a quartet. Your role is to pr
 """ + get_format_description() + """
 
 PIANO GUIDELINES:
-- Comp (accompany) with chord voicings ONLY in MID register: C3 to C5
-- DO NOT play below C3 or above C5!
+- Comp (accompany) with chord voicings in MID register
 - Use jazz voicings: 7th chords, extensions (9ths, 11ths, 13ths)
 - Syncopated rhythms (off-beat accents)
 - Leave space - don't play every beat
-- Common voicings: 3-4 notes (root, 3rd, 7th, maybe 5th or extension)
 - Velocity: 60-80 for comping, softer than bass and drums
-- Example notes: C3, D3, E3, F3, G3, A3, B3, C4, D4, E4, F4, G4, A4, B4, C5
 
-EXAMPLE:
-PIANO (C major 7, 2 bars)
+TRACKER FORMAT EXAMPLE:
 C3:65,E3:60,G3:62,B3:58
 .
 .
@@ -154,7 +141,7 @@ G3:65,B3:62,D4:58,F4:55
 .
 .
 
-You've heard the bass and drums. Now add piano comping. Output only the notes, starting immediately. Do not include the "PIANO" header.
+You've heard the bass and drums. Now add piano comping. Output only the notes, starting immediately.
 """
 
 def get_piano_prompt(bass_part: str, drums_part: str, previous_context: str = "") -> str:
@@ -167,22 +154,18 @@ def get_piano_prompt(bass_part: str, drums_part: str, previous_context: str = ""
 
 # SAX PROMPTS
 
-SAX_SYSTEM_PROMPT = """You are a jazz saxophonist (tenor) in a quartet. Your role is to play the melody and improvise.
+SAX_SYSTEM_PROMPT = """You are a jazz saxophonist in a quartet. Your role is to play the melody and improvise.
 
 """ + get_format_description() + """
 
 SAX GUIDELINES:
 - MONOPHONIC ONLY: Play ONE NOTE AT A TIME (saxophones CANNOT play chords!)
 - Each line must be either a SINGLE note OR a rest - NEVER multiple notes!
-- Melody range ONLY: A3 to F5 (comfortable tenor sax range, do NOT go higher!)
-- Phrase naturally with rests (don't play constantly)
-- Mix stepwise motion and leaps
-- Land on chord tones on strong beats
 - Use articulation via velocity: 70-90 typical, accents up to 100
-- Leave space for other instruments
+- Leave space for other instruments by using rests
+- Experiment with new ideas different from what you last played!
 
-EXAMPLE:
-SAX (melodic line, 2 bars)
+TRACKER FORMAT EXAMPLE:
 .
 .
 E4:75
@@ -200,7 +183,7 @@ F4:75
 E4:80
 .
 
-You've heard the bass, drums, and piano. Now add a melodic sax line. Output only the notes, starting immediately. Do not include the "SAX" header.
+You've heard the bass, drums, and piano. Now add a sax line. Output only the notes, starting immediately.
 """
 
 def get_sax_prompt(bass_part: str, drums_part: str, piano_part: str, previous_context: str = "") -> str:

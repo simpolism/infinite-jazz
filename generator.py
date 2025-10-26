@@ -76,14 +76,6 @@ class GenerationPipeline:
                 print(f"\nGenerated {instrument}:")
                 print(validated_output[:200] + "..." if len(validated_output) > 200 else validated_output)
 
-            if instrument == 'PIANO':
-                self._check_pitch_range(
-                    instrument,
-                    validated_output,
-                    min_pitch=config.PITCH_RANGES['PIANO'][0],
-                    max_pitch=config.PITCH_RANGES['PIANO'][1]
-                )
-
         # Parse all parts together
         full_tracker = self._assemble_tracker(generated_text)
         tracks = parse_tracker(full_tracker)
@@ -232,14 +224,6 @@ class GenerationPipeline:
 
             validated_output = self._validate_output(cleaned_output, instrument)
 
-            out_of_range = self._detect_out_of_range(instrument, validated_output)
-            if out_of_range:
-                print(
-                    f"  Warning: {instrument} generation attempt {attempt} contains pitches outside"
-                    f" the allowed range. Regenerating. (Examples: {', '.join(sorted(out_of_range)[:3])})"
-                )
-                continue
-
             if self._has_meaningful_content(validated_output):
                 return validated_output
 
@@ -257,59 +241,6 @@ class GenerationPipeline:
             if stripped and stripped != '.':
                 return True
         return False
-
-    def _detect_out_of_range(self, instrument: str, output: str) -> set:
-        """Return set of pitches outside the allowed range for the instrument"""
-        if instrument not in config.PITCH_RANGES:
-            return set()
-
-        min_pitch, max_pitch = config.PITCH_RANGES[instrument]
-        invalid = set()
-
-        for line in output.split('\n'):
-            stripped = line.strip()
-            if not stripped or stripped == '.':
-                continue
-
-            for token in stripped.split(','):
-                token = token.strip().rstrip('.,;')
-                if ':' not in token:
-                    continue
-                note_part = token.split(':', 1)[0].strip()
-                try:
-                    midi_num = TrackerParser.note_to_midi(note_part)
-                    if not (min_pitch <= midi_num <= max_pitch):
-                        invalid.add(note_part)
-                except Exception:
-                    invalid.add(note_part)
-
-        return invalid
-
-    def _check_pitch_range(self, instrument: str, output: str, min_pitch: int, max_pitch: int):
-        """Log warnings if validated output still contains out-of-range notes"""
-        invalid = []
-        for line in output.split('\n'):
-            stripped = line.strip()
-            if not stripped or stripped == '.':
-                continue
-            for token in stripped.split(','):
-                token = token.strip()
-                if ':' not in token:
-                    continue
-                note_part = token.split(':', 1)[0].strip()
-                try:
-                    midi_num = TrackerParser.note_to_midi(note_part)
-                    if not (min_pitch <= midi_num <= max_pitch):
-                        invalid.append(note_part)
-                except Exception:
-                    invalid.append(note_part)
-
-        if invalid:
-            unique = ', '.join(sorted(set(invalid))[:5])
-            print(
-                f"  Warning: {instrument} output contains notes outside the target range."
-                f" Examples: {unique}"
-            )
 
 
 class ContinuousGenerator:
