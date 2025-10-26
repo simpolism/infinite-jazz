@@ -45,7 +45,15 @@ def test_batched_prompt(llm: LLMInterface, previous_context: str = "", verbose: 
     print(f"\n{'='*60}")
     print("RAW LLM OUTPUT")
     print(f"{'='*60}\n")
-    print(raw_output)
+    if raw_output:
+        print(raw_output)
+    else:
+        print("⚠️  EMPTY OUTPUT!")
+        print("This usually means:")
+        print("  1. Model doesn't understand the prompt format")
+        print("  2. Model needs system/user message split")
+        print("  3. Model needs explicit output trigger (e.g., 'Output:')")
+        print("  4. Max tokens is being hit immediately (check model logs)")
     print(f"\n{'='*60}")
 
     # Analyze output
@@ -84,7 +92,15 @@ def test_instrument_prompt(llm: LLMInterface, instrument: str, verbose: bool = F
     print(f"\n{'='*60}")
     print("RAW LLM OUTPUT")
     print(f"{'='*60}\n")
-    print(raw_output)
+    if raw_output:
+        print(raw_output)
+    else:
+        print("⚠️  EMPTY OUTPUT!")
+        print("This usually means:")
+        print("  1. Model doesn't understand the prompt format")
+        print("  2. Model needs system/user message split")
+        print("  3. Model needs explicit output trigger (e.g., 'Output:')")
+        print("  4. Max tokens is being hit immediately (check model logs)")
     print(f"\n{'='*60}")
 
     # Analyze output
