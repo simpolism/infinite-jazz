@@ -6,7 +6,7 @@ from tracker_parser import TrackerParser
 
 # Timing configuration
 TEMPO = 120  # BPM
-RESOLUTION = '8th'  # '8th' or '16th' note resolution
+RESOLUTION = '16th'  # '8th' or '16th' note resolution
 
 # Note duration mode
 NOTE_MODE = 'trigger'  # 'trigger' or 'sustain'

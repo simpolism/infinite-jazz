@@ -308,7 +308,7 @@ SAX - Lead melody and improvisation
 - Mix short bursts with long notes - vary rhythm!
 - Velocity: 70-90, accents up to 100
 
-COMPLETE EXAMPLE:
+FORMAT EXAMPLE (showing style, not exact length):
 
 BASS
 C2:80
@@ -394,7 +394,7 @@ A4:70
 
 """
 
-    prompt += "Generate YOUR version now. Be creative with the sax! Format exactly like above. Start with 'BASS' then exactly 16 lines:"
+    prompt += f"Generate YOUR version now. Be creative with the sax! Format exactly like above. Start with 'BASS' then exactly {config.get_total_steps()} lines:"
 
     return prompt
 
