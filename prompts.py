@@ -33,7 +33,9 @@ BASS_SYSTEM_PROMPT = """You are a jazz bassist in a quartet. Your role is to pro
 """ + get_format_description() + """
 
 BASS GUIDELINES:
-- Play ONLY in the LOW register: E1 to G2 (DO NOT go higher than G2!)
+- CRITICAL RANGE LIMIT: E1, F1, F#1, G1, G#1, A1, A#1, B1, C2, C#2, D2, D#2, E2, F2, F#2, G2 ONLY
+- NEVER EVER use A2, B2, C3 or anything higher than G2!
+- You are BASS - stay LOW! Check every note!
 - Walking bass: Stepwise motion connecting chord tones
 - Emphasize root notes on strong beats
 - Velocity: 75-90 for quarter notes, 65-80 for walking
@@ -45,7 +47,7 @@ E2:75
 .
 G2:75
 .
-A2:70
+F2:70
 .
 C2:80
 .
@@ -180,26 +182,58 @@ SAX_SYSTEM_PROMPT = """You are a jazz saxophonist in a quartet. Your role is to 
 SAX GUIDELINES:
 - MONOPHONIC ONLY: Play ONE NOTE AT A TIME (saxophones CANNOT play chords!)
 - Each line must be either a SINGLE note OR a rest - NEVER multiple notes!
-- Use articulation via velocity: 70-90 typical, accents up to 100
-- Leave space for other instruments by using rests
-- Experiment with new ideas different from what you last played!
+- CRITICAL RANGE LIMIT: A3, A#3, B3, C4, C#4, D4, D#4, E4, F4, F#4, G4, G#4, A4, A#4, B4, C5, C#5, D5, D#5, E5, F5 ONLY
+- NEVER EVER go higher than F5! No G5, A5, B5, C6 - those are TOO HIGH!
+- NO SCALES! Scales are BORING! Don't play E-F-G-A-B or C-D-E-F or any stepwise patterns!
+- Use LEAPS (3rds, 4ths, 5ths, octaves) - jump around, don't walk up/down stepwise!
+- RHYTHM IS KEY: Use 30-50% rests - leave space between phrases!
+- Mix long notes with short bursts - vary the rhythm!
+- Velocity: 70-90 typical, accents up to 100
 
-TRACKER FORMAT EXAMPLE:
-.
-.
-E4:75
-G4:80
-A4:85
-G4:75
-F4:70
-E4:75
-D4:70
+BAD EXAMPLE (boring scale - DON'T DO THIS):
 C4:75
-.
-.
-D4:80
+D4:75
+E4:75
 F4:75
+G4:75
+A4:75
+B4:75
+C5:75
+
+GOOD EXAMPLE 1 - Bebop (leaps, space, variety):
+.
+.
+E4:85
+.
+B4:90
+G4:75
+.
 E4:80
+.
+.
+C5:85
+.
+A4:70
+.
+.
+.
+
+GOOD EXAMPLE 2 - Blues phrase (repetition with variation):
+.
+D4:75
+D4:80
+D4:70
+.
+.
+F4:85
+D#4:90
+D4:75
+.
+.
+.
+A3:80
+.
+.
 .
 
 You've heard the bass, drums, and piano. Now add a sax line. Output only the notes, starting immediately.
@@ -248,7 +282,8 @@ FORMAT RULES:
 INSTRUMENT ROLES:
 
 BASS - Walking bassline foundation
-- Range: E1 to G2 (low register)
+- CRITICAL RANGE: E1, F1, F#1, G1, G#1, A1, A#1, B1, C2, C#2, D2, D#2, E2, F2, F#2, G2 ONLY
+- NEVER use A2, B2, C3 or higher than G2! You are BASS - stay LOW!
 - Stepwise motion connecting chord tones
 - Emphasize roots on strong beats
 - Velocity: 70-85
@@ -265,9 +300,12 @@ PIANO - Chord comping
 
 SAX - Lead melody and improvisation
 - MONOPHONIC: ONE note per line (saxes can't play chords!)
-- Range: A3 to F5
-- Be creative! Vary intervals, use space (rests), tell a story
-- Think bebop lines, unexpected turns, melodic phrases
+- CRITICAL RANGE: A3 to F5 ONLY (A3, A#3, B3, C4...E5, F5)
+- NEVER go higher than F5! No G5, A5, B5 - TOO HIGH!
+- NO SCALES! Don't play stepwise patterns (E-F-G-A-B)!
+- Use LEAPS (3rds, 4ths, 5ths, octaves) - jump around!
+- RHYTHM IS KEY: Use 30-50% rests - leave space!
+- Mix short bursts with long notes - vary rhythm!
 - Velocity: 70-90, accents up to 100
 
 COMPLETE EXAMPLE:
@@ -279,7 +317,7 @@ E2:75
 .
 G2:75
 .
-A2:70
+F2:70
 .
 C2:80
 .
@@ -329,19 +367,19 @@ G3:65,B3:62,D4:58
 SAX
 .
 .
-E4:75
-G4:80
-A4:85
+E4:85
+.
+B4:90
 G4:75
-F4:70
-E4:75
-D4:70
-C4:75
 .
-.
-D4:80
-F4:75
 E4:80
+.
+.
+C5:85
+.
+A4:70
+.
+.
 .
 """
 

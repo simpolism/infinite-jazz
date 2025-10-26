@@ -294,13 +294,27 @@ class GenerationPipeline:
         return '\n\n'.join(sections)
 
     def get_previous_context(self) -> str:
-        """Get previous section for continuity"""
+        """Get previous section for continuity (truncated to last few notes)"""
         if not self.history:
             return ""
 
-        # Return the last section
+        # Return only the ENDINGS of the last section (last 4 notes per instrument)
+        # This provides continuity without overwhelming small models with patterns to copy
         prev = self.history[-1]
-        return self._assemble_tracker(prev)
+        truncated = {}
+
+        for instrument in self.GENERATION_ORDER:
+            if instrument in prev:
+                lines = prev[instrument].split('\n')
+                # Get last 4 lines only
+                truncated[instrument] = '\n'.join(lines[-4:])
+
+        sections = []
+        for instrument in self.GENERATION_ORDER:
+            if instrument in truncated:
+                sections.append(f"{instrument} (ending):\n...{truncated[instrument]}")
+
+        return '\n\n'.join(sections)
 
     def _generate_instrument_output(self, instrument: str, prompt: str) -> str:
         """Generate output for a single instrument with retry strategy"""

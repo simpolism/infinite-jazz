@@ -161,7 +161,7 @@ class MIDIConverter:
         # General MIDI program numbers (0-indexed)
         programs = {
             'PIANO': 0,   # Acoustic Grand Piano
-            'BASS': 32,   # Acoustic Bass
+            'BASS': 33,   # Electric Bass (Finger) - louder than 32 (Acoustic Bass)
             'SAX': 65,    # Soprano Sax (can change to 66 for Alto, 67 for Tenor)
         }
         return programs.get(instrument_name, 0)
