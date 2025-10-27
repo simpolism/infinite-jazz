@@ -19,23 +19,25 @@ https://github.com/user-attachments/assets/e2c88863-a5c6-492a-8606-d2ed5f727e6b
 
 ## Quickstart
 
-### 1. Install Python dependencies
+### 1. Set up the environment
 
 ```bash
+python -m venv .venv
+. .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Optional software synth:
+Optional software synth (FluidSynth provides the default software backend):
 
 ```bash
 # Debian / Ubuntu
 sudo apt-get install fluidsynth
 
-# macOS
+# macOS (Homebrew)
 brew install fluid-synth
 ```
 
-### 2. Pick an inference backend
+### 2. Choose an inference backend
 
 **Groq (recommended)**
 ```bash
@@ -64,14 +66,36 @@ Stop playback with `Ctrl+C`; the app drains the buffer and exits cleanly.
 
 ---
 
+## Everyday Workflow
+
+```bash
+# 1. Activate the repo's virtualenv (keeps dependencies pinned)
+. .venv/bin/activate
+
+# 2. Run the realtime generator with Groq (default model + endpoint)
+python realtime_jazz.py --llm-backend openai --save-output --context-steps 128
+
+# 3. Inspect saved tracker/MIDI artifacts (ignored by git)
+ls output/
+```
+
+- Append collaborator notes with `--prompt "atmospheric, sparse"` without touching base prompts.
+- Flip to the exploratory template via `--prompt-style experimental`.
+- Increase continuity with `--context-steps 128` (32 is the default); use `0` for clean-room sections.
+- Use `--seed 42` (or any integer) to make the LLM generation deterministic for A/B comparisons.
+- `--tempo`, `--swing`, or other `RuntimeConfig` tweaks should be applied by cloning `DEFAULT_CONFIG` via `dataclasses.replace` rather than mutating globals.
+
+---
+
 ## Architecture Overview
 
 1. **Prompting** – `prompts.PromptBuilder` emits quartet prompts tailored by runtime config and style.
 2. **Generation** – `generator.GenerationPipeline` calls the LLM, parses the response into structured tracks, and keeps a short history for continuity.
 3. **Buffering** – `generator.ContinuousGenerator` maintains a queue of upcoming sections so playback never waits on inference.
 4. **Conversion** – `midi_converter.MIDIConverter` converts tracker steps to MIDI events on a fixed 16th-note grid with optional swing.
-5. **Playback** – `runtime.RealtimeJazzGenerator` schedules events and streams them through audio backends (FluidSynth, hardware MIDI, or a virtual port).
-6. **Application layer** – `app.InfiniteJazzApp` wires the runtime config, LLM interface, and audio backend; `realtime_jazz.py` is now a thin CLI wrapper.
+5. **Playback** – `audio_output.RealtimePlayer` schedules events and streams them through FluidSynth, hardware MIDI, or a virtual port.
+6. **Runtime** – `runtime.RealtimeJazzGenerator` glues generation, conversion, buffering, and playback together.
+7. **Application layer** – `app.InfiniteJazzApp` prepares dependencies; `realtime_jazz.py` is a thin CLI wrapper around the app.
 
 The whole loop runs continuously: while one section plays, the system composes the next ones in the background.
 
@@ -122,11 +146,13 @@ cfg.total_steps                      # Derived 16th-note steps per section
 
 `RuntimeConfig` also exposes channel and pitch-range maps plus swing parameters. Thread a config instance through constructors instead of mutating globals.
 
+- Need a tempo tweak for one run? Use `replace(DEFAULT_CONFIG, tempo=140)` at the wiring layer (`app.py`, tests, or scripts) rather than changing `config.py`.
+- Generated tracker and MIDI artifacts live in `output/` (ignored by git) so you can archive or audition takes without polluting commits.
+
 ---
 
 ## Tuning Creativity
 
-- Prompt styles rotate each cycle (`modern swing`, `modal post-bop`, `uptempo bebop`, `late-night ballad`). Edit `PromptBuilder.style_palette` in `prompts.py` to curate or fix a vibe.
 - Generation temperature/top-p defaults are 1.05 / 0.99 with `max_tokens` ≈ 4500 to comfortably handle 32-step sections (and longer, if you increase bar count). Drop temperature/top-p for tighter adherence, or bump them for wilder phrases.
 - Inject custom instructions by subclassing `PromptBuilder` or swapping it in `GenerationPipeline` (e.g., derivative of `PromptBuilder` that emphasises polyrhythms or Latin grooves).
 - Still want more surprise? Feed a short corpus of tracker snippets into `previous_context` to prime different harmonic territory before realtime playback.
@@ -163,15 +189,19 @@ cfg.total_steps                      # Derived 16th-note steps per section
 
 ```
 infinite_jazz/
-├── realtime_jazz.py   # CLI entrypoint & orchestration
-├── generator.py       # Batched LLM pipeline & buffering
-├── prompts.py         # Quartet prompt template
-├── tracker_parser.py  # Tracker text → structured tracks
-├── midi_converter.py  # Tracker → MIDI (file + realtime)
-├── audio_output.py    # FluidSynth / hardware / virtual backends
-├── llm_interface.py   # Ollama + OpenAI-compatible API adapters
-├── config.py          # Musical & timing configuration
-├── txt_to_midi.py     # Convert archived tracker text to MIDI
+├── realtime_jazz.py        # CLI entrypoint (arg parsing + app.run)
+├── app.py                  # Dependency wiring (LLM/audio/runtime)
+├── runtime.py              # Realtime coordinator (generation → playback)
+├── generator.py            # Batched LLM pipeline & buffering
+├── prompts.py              # Default prompt templates
+├── experimental_prompt.py  # Alternate "experimental" template
+├── tracker_parser.py       # Tracker text → structured tracks
+├── midi_converter.py       # Tracker → MIDI (files + realtime messages)
+├── audio_output.py         # FluidSynth / hardware / virtual backends
+├── llm_interface.py        # Ollama + OpenAI-compatible API adapters
+├── midi_to_mp3.py          # Offline MIDI rendering helper
+├── txt_to_midi.py          # Convert archived tracker text to MIDI
+├── config.py               # Immutable RuntimeConfig + defaults
 └── requirements.txt
 ```
 
@@ -191,6 +221,8 @@ infinite_jazz/
 - **Playback stutters** – Groq model may be too slow; choose a faster variant or increase `ContinuousGenerator.buffer_size`.
 - **No sound** – ensure FluidSynth is installed (or switch to `--backend hardware/virtual`).
 - **Ollama outputs empty sections** – smaller local models sometimes struggle with strict formatting; Groq/OpenAI models are more reliable.
+- **Weird out-of-range notes** – parser now skips them with a warning instead of aborting; check prompts/style if it happens often.
+- **Offline MIDI drifts vs realtime** – `midi_converter` now mirrors realtime swing timing; regenerate the section if you have older exports.
 
 ---
 

@@ -23,6 +23,7 @@ class GenerationPipeline:
         context_steps: int = 32,
         extra_prompt: str = "",
         prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder,
+        seed: Optional[int] = None,
         max_retries: int = 3
     ):
         """
@@ -44,6 +45,7 @@ class GenerationPipeline:
         steps_per_section = self.config.total_steps or 1
         self.history_limit = max(3, (self.context_steps // steps_per_section) + 2)
         self.max_retries = max(1, max_retries)
+        self.seed = seed
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -122,6 +124,8 @@ class GenerationPipeline:
             'top_p': 0.99,
             'repeat_penalty': 1.0,
         }
+        if self.seed is not None:
+            gen_config['seed'] = self.seed
 
         result = self.llm.generate(prompt, **gen_config)
         raw_output = result.text
@@ -342,6 +346,7 @@ class ContinuousGenerator:
         verbose: bool = False,
         context_steps: int = 32,
         extra_prompt: str = "",
+        seed: Optional[int] = None,
         prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder
     ):
         """
@@ -362,6 +367,7 @@ class ContinuousGenerator:
             verbose=verbose,
             context_steps=context_steps,
             extra_prompt=extra_prompt,
+            seed=seed,
             prompt_builder_factory=prompt_builder_factory
         )
         self.buffer_size = buffer_size

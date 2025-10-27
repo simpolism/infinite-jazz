@@ -114,6 +114,11 @@ Examples:
         default='default',
         help='Prompt preset to use (default or experimental)'
     )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        help='Optional RNG seed forwarded to the LLM for reproducible generations'
+    )
     return parser
 
 
@@ -151,6 +156,7 @@ def main(argv: Optional[list[str]] = None):
         context_steps=max(0, args.context_steps),
         prompt=args.prompt.strip() if args.prompt else None,
         prompt_style=args.prompt_style,
+        seed=args.seed,
     )
 
     app = InfiniteJazzApp(

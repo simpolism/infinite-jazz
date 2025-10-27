@@ -72,6 +72,7 @@ class OllamaBackend:
         top_k: int = 40,
         repeat_penalty: float = 1.1,
         stop: Optional[list] = None,
+        seed: Optional[int] = None,
         **kwargs
     ) -> GenerationResult:
         """Generate text from prompt."""
@@ -88,6 +89,9 @@ class OllamaBackend:
 
         if stop:
             options['stop'] = stop
+
+        if seed is not None:
+            options['seed'] = seed
 
         response = self.client.generate(
             model=self.model_name,
@@ -172,6 +176,7 @@ class OpenAIBackend:
         top_k: int = 40,
         repeat_penalty: float = 1.1,
         stop: Optional[list] = None,
+        seed: Optional[int] = None,
         **kwargs
     ) -> GenerationResult:
         """Generate text from prompt."""
@@ -198,6 +203,9 @@ class OpenAIBackend:
 
         if stop:
             completion_kwargs['stop'] = stop
+
+        if seed is not None:
+            completion_kwargs['seed'] = seed
 
         try:
             response = self.client.chat.completions.create(**completion_kwargs)

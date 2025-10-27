@@ -37,6 +37,7 @@ class RunOptions:
     context_steps: int = 32
     prompt: Optional[str] = None
     prompt_style: str = "default"
+    seed: Optional[int] = None
 
 
 class InfiniteJazzApp:
@@ -139,6 +140,7 @@ class InfiniteJazzApp:
             context_steps=self.run_options.context_steps,
             extra_prompt=self.run_options.prompt or "",
             prompt_style=self.run_options.prompt_style,
+            seed=self.run_options.seed,
             prompt_builder_factory=prompt_builder_factory,
         )
 

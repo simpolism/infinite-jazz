@@ -81,71 +81,81 @@ class PromptBuilder:
         constraint = random.choice(DYNAMIC_CONSTRAINTS)
 
         prompt = [
-            f"You are an {self.style} jazz quartet generating {bars} bars of music.",
-            "Create music that feels like jazz but isn't afraid to surprise.",
-            f"Tempo feel: {tempo} BPM on a 16th-note grid.",
+            "CRITICAL: You are generating TRACKER FORMAT DATA for a MIDI sequencer, not prose.",
+            "This is a structured data format that will be parsed by software.",
             "",
-            "FORMAT RULES:",
-            f"- {steps} numbered lines per instrument (one line = one 16th-note step)",
-            '- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80"), NUMBER . (rest), or NUMBER ^ (tie)',
-            '- Chords: NUMBER NOTE:VELOCITY,NOTE:VELOCITY (e.g., "1 C3:65,E3:62,G3:60")',
-            "- Velocity range: 0-127 (but vary dynamics for expression)",
+            f"Generate exactly {steps} lines for each of 4 instruments ({bars} bars at {tempo} BPM).",
             "",
-            "INSTRUMENTS & POSSIBILITIES:",
-            "BASS – Walking lines, pedal points, melodic runs, or sparse roots. Range: E1-G3",
-            "DRUMS – Swing, straight, broken, or implied time. Create texture with velocity.",
-            "PIANO – Comping, clusters, single notes, countermelodies, or silence. Range: A0-C7",
-            "SAX – The horn can wail, whisper, stab, float, or fragment. Range: Bb2-F#5",
+            "STRICT FORMAT REQUIREMENTS (violations will cause parsing errors):",
+            f"1. Each instrument section starts with its name alone on a line: BASS, DRUMS, PIANO, SAX",
+            f"2. Each instrument MUST have exactly {steps} numbered lines (1 through {steps})",
+            "3. Each numbered line MUST follow ONE of these exact patterns:",
+            "   - Rest: NUMBER .",
+            "   - Single note: NUMBER NOTE:VELOCITY",
+            "   - Chord: NUMBER NOTE:VEL,NOTE:VEL,NOTE:VEL",  
+            "   - Tie: NUMBER ^",
+            "4. NO other text, NO comments, NO variations to this format",
             "",
-            "APPROACH FOR THIS SECTION:",
+            "VALID NOTES (ONLY these are allowed):",
+            "C, C#, D, D#, E, F, F#, G, G#, A, A#, B",
+            "With octave numbers: C1, C#1, D1... up to C7",
+            "",
+            "INSTRUMENT RANGES (stay within these or parsing fails):",
+            "BASS: E1 to G3",
+            "DRUMS: C1 to B4 (percussion mapping)",
+            "PIANO: A0 to C7", 
+            "SAX: Bb2 to F#5",
+            "",
+            "VELOCITY: Must be integer 0-127",
+            "",
+            "MUSICAL APPROACH FOR THIS SECTION:",
             exploration,
             "",
             f"SPECIFIC CHALLENGE: {constraint}",
         ]
 
         prompt.append("")
-        prompt.extend(EXAMPLE_SNIPPET)
+        prompt.append("EXACT FORMAT EXAMPLE (your notes/rhythms must differ):")
+        prompt.extend(EXAMPLE_SNIPPET[1:])  # Skip "FORMAT EXAMPLE:" line since we have our own
 
         prompt.extend([
             "",
-            "NOTE: The example shows format only. Create completely different musical content.",
-            "",
-            "MUSICAL PRINCIPLES:",
-            "- Jazz is about interaction and surprise within a flowing conversation",
-            "- Each chorus should feel related but never identical to what came before",
-            "- Embrace both the expected and unexpected - swing and anti-swing",
-            "- Let patterns emerge and dissolve naturally",
-            "- If something worked before, transform it rather than repeat it",
+            "REMEMBER:",
+            f"- Output EXACTLY {steps} numbered lines per instrument",
+            "- Use ONLY the note names listed above with octave numbers",
+            "- NO prose, NO descriptions, ONLY the tracker format",
+            "- Think musically but output ONLY valid tracker data",
         ])
 
         if previous_context:
             # Analyze context length to provide different instructions
             context_lines = previous_context.strip().split('\n')
             if len(context_lines) > 100:  # More than ~1.5 sections
-                context_instruction = "Reference ideas from EARLIER in the context, not just the last section. Transform and develop motifs."
+                context_instruction = "Reference motifs from EARLIER sections, not just the last one."
             else:
-                context_instruction = "Acknowledge what just happened but take it somewhere new."
+                context_instruction = "Develop from what came before without copying."
             
             prompt.extend([
                 "",
-                "PREVIOUS CONTEXT (for continuity, not copying):",
+                "PREVIOUS CONTEXT (for musical continuity):",
                 previous_context,
                 "",
-                f"CONTEXT GUIDANCE: {context_instruction}",
-                "Avoid repeating rhythmic patterns verbatim. If a phrase appears familiar, twist it.",
-            ])
-        else:
-            prompt.extend([
-                "",
-                "This is the opening - establish a mood but leave room to develop.",
+                f"CONTEXT NOTE: {context_instruction}",
             ])
 
         prompt.extend([
             "",
-            f"Generate the new section now with exactly {steps} lines per instrument.",
-            "Start with 'BASS' as the first line.",
+            "OUTPUT REQUIREMENTS:",
+            "1. First line must be: BASS",
+            f"2. Follow with exactly {steps} numbered lines for bass",
+            "3. Then: DRUMS (blank line before is OK)",
+            f"4. Follow with exactly {steps} numbered lines for drums",
+            "5. Then: PIANO",
+            f"6. Follow with exactly {steps} numbered lines for piano",
+            "7. Then: SAX",
+            f"8. Follow with exactly {steps} numbered lines for sax",
             "",
-            "Remember: Make jazz that breathes, evolves, and occasionally surprises itself.",
+            "Generate the tracker data now:",
         ])
 
         return "\n".join(prompt)
