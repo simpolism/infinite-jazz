@@ -33,6 +33,7 @@ class RunOptions:
     output_dir: str = "output"
     verbose: bool = False
     context_steps: int = 32
+    prompt_flavor: Optional[str] = None
 
 
 class InfiniteJazzApp:
@@ -129,6 +130,7 @@ class InfiniteJazzApp:
             output_dir=self.run_options.output_dir,
             verbose=self.run_options.verbose,
             context_steps=self.run_options.context_steps,
+            extra_prompt=self.run_options.prompt_flavor or "",
         )
 
         generator.run(num_sections=self.run_options.num_sections)

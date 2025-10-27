@@ -26,7 +26,8 @@ class RealtimeJazzGenerator:
         save_output: bool = False,
         output_dir: str = "output",
         verbose: bool = False,
-        context_steps: int = 32
+        context_steps: int = 32,
+        extra_prompt: str = ""
     ):
         self.llm = llm
         self.audio_backend = audio_backend
@@ -47,7 +48,8 @@ class RealtimeJazzGenerator:
             llm,
             runtime_config,
             verbose=verbose,
-            context_steps=context_steps
+            context_steps=context_steps,
+            extra_prompt=extra_prompt
         )
         self.midi_converter = MIDIConverter(runtime_config)
 

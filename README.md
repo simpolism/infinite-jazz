@@ -131,6 +131,7 @@ cfg.total_steps                      # Derived 16th-note steps per section
 - Inject custom instructions by subclassing `PromptBuilder` or swapping it in `GenerationPipeline` (e.g., derivative of `PromptBuilder` that emphasises polyrhythms or Latin grooves).
 - Still want more surprise? Feed a short corpus of tracker snippets into `previous_context` to prime different harmonic territory before realtime playback.
 - Control how much history the model references with `--context-steps` (default 32). Higher values increase continuity; lower values encourage fresh jumps.
+- Add custom vibe text with `--prompt-flavor "bouncy, upbeat"` (or any phrase) to inject extra guidance on top of the base prompt.
 
 ---
 

@@ -223,20 +223,12 @@ class PromptBuilder:
 
     config: RuntimeConfig
     primary_style: str = "modern swing"
-    style_palette: Iterable[str] = (
-        "modern swing",
-        "modal post-bop exploration",
-        "uptempo bebop chase",
-        "late-night ballad phrasing",
-    )
+    style_palette: Iterable[str] = ()
     examples_per_prompt: int = 2
     example_catalog: List[List[str]] = field(default_factory=_default_examples)
-    _style_cycle: cycle = field(init=False, repr=False)
 
     def __post_init__(self):
-        palette: List[str] = list(self.style_palette) or [self.primary_style]
-        if self.primary_style not in palette:
-            palette.insert(0, self.primary_style)
+        palette: List[str] = [self.primary_style]
         self._style_cycle = cycle(palette)
 
     def _active_style(self) -> str:

@@ -19,7 +19,8 @@ class GenerationPipeline:
         llm: LLMInterface,
         runtime_config: RuntimeConfig,
         verbose: bool = False,
-        context_steps: int = 32
+        context_steps: int = 32,
+        extra_prompt: str = ""
     ):
         """
         Initialize generation pipeline
@@ -35,6 +36,7 @@ class GenerationPipeline:
         self.verbose = verbose
         self.config = runtime_config
         self.prompt_builder = PromptBuilder(runtime_config)
+        self.extra_prompt = extra_prompt.strip()
         self.context_steps = max(0, context_steps)
         steps_per_section = self.config.total_steps or 1
         self.history_limit = max(3, (self.context_steps // steps_per_section) + 2)
@@ -84,6 +86,8 @@ class GenerationPipeline:
 
         # Build batched prompt
         prompt = self.prompt_builder.build_quartet_prompt(previous_context)
+        if self.extra_prompt:
+            prompt += "\n\nPLAYER DIRECTION: " + self.extra_prompt
 
         # Generate with higher token limit (need to fit all 4 instruments)
         # Reasoning models need MUCH more tokens (they use tokens for internal reasoning)
@@ -311,7 +315,8 @@ class ContinuousGenerator:
         runtime_config: RuntimeConfig,
         buffer_size: int = 4,
         verbose: bool = False,
-        context_steps: int = 4
+        context_steps: int = 32,
+        extra_prompt: str = ""
     ):
         """
         Initialize continuous generator
@@ -329,7 +334,8 @@ class ContinuousGenerator:
             llm,
             runtime_config,
             verbose=verbose,
-            context_steps=context_steps
+            context_steps=context_steps,
+            extra_prompt=extra_prompt
         )
         self.buffer_size = buffer_size
         self.buffer = []
