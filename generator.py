@@ -256,10 +256,14 @@ class GenerationPipeline:
         for i, line in enumerate(lines):
             line = line.strip()
 
-            # Empty or rest
-            if not line or line == '.':
-                validated_lines.append('.')
+            # Empty or rest or tie
+            if not line or line == '.' or line == '^':
+                validated_lines.append(line)
                 continue
+
+            # Strip trailing comments/explanations (LLMs love to explain themselves)
+            # Remove anything after: parentheses, #, //, --, etc.
+            line = re.split(r'\s+[(\[#]|//|--', line)[0].strip()
 
             # Validate note format
             try:
@@ -277,7 +281,7 @@ class GenerationPipeline:
 
     def _is_valid_line(self, line: str) -> bool:
         """Check if line matches valid tracker format"""
-        if line == '.':
+        if line == '.' or line == '^':
             return True
 
         # Clean up common LLM mistakes before validation

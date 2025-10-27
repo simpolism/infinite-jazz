@@ -18,7 +18,8 @@ TRACKER FORMAT:
 - Format: "NUMBER SPACE NOTE:VELOCITY" (e.g., "1 C4:80" or "1 .")
 - When you write "{steps} ..." you are DONE - STOP generating!
 - Chords: Comma-separated (e.g., "1 C4:70,E4:65,G4:68")
-- Rests: Single period after the number (e.g., "1 .")
+- Rests: Single period (e.g., "1 .")
+- Ties: Caret symbol ^ to hold previous note longer (e.g., "1 C4:80" then "2 ^" holds C4)
 - NEVER add periods after note:velocity pairs! Only use periods for rests!
 - Velocity: 0-127 (60-90 typical for jazz)
 - Note names: C, C#, D, D#, E, F, F#, G, G#, A, A#, B with octave (e.g., C4, F#2)
@@ -32,20 +33,18 @@ BASS_SYSTEM_PROMPT = """You are a jazz bassist in a quartet. Your role is to pro
 """ + get_format_description() + """
 
 BASS GUIDELINES:
-- CRITICAL RANGE LIMIT: E1, F1, F#1, G1, G#1, A1, A#1, B1, C2, C#2, D2, D#2, E2, F2, F#2, G2 ONLY
-- NEVER EVER use A2, B2, C3 or anything higher than G2!
-- You are BASS - stay LOW! Check every note!
+- Recommended range: E1 to G2 (keep it low for bass sound)
 - Walking bass: Stepwise motion connecting chord tones
 - Emphasize root notes on strong beats
 - Velocity: 75-90 for quarter notes, 65-80 for walking
 
-TRACKER FORMAT EXAMPLE:
+TRACKER FORMAT EXAMPLE (note ^ holds previous note):
 1 C2:80
-2 .
+2 ^
 3 E2:75
 4 .
 5 G2:75
-6 .
+6 ^
 7 F2:70
 8 .
 9 C2:80
@@ -53,15 +52,15 @@ TRACKER FORMAT EXAMPLE:
 11 B1:75
 12 .
 13 A1:75
-14 .
+14 ^
 15 G1:70
 16 .
 17 C2:80
-18 .
+18 ^
 19 E2:75
 20 .
 21 G2:70
-22 .
+22 ^
 23 F2:75
 24 .
 25 E2:80
@@ -69,8 +68,8 @@ TRACKER FORMAT EXAMPLE:
 27 D2:75
 28 .
 29 C2:80
-30 .
-31 B1:75
+30 ^
+31 ^
 32 .
 
 Now generate a bassline. Output only the notes, starting immediately.
@@ -231,68 +230,47 @@ SAX_SYSTEM_PROMPT = """You are a jazz saxophonist in a quartet. Your role is to 
 
 SAX GUIDELINES:
 - MONOPHONIC ONLY: Play ONE NOTE AT A TIME (saxophones CANNOT play chords!)
-- Each line must be either a SINGLE note OR a rest - NEVER multiple notes!
-- CRITICAL RANGE LIMIT: A3, A#3, B3, C4, C#4, D4, D#4, E4, F4, F#4, G4, G#4, A4, A#4, B4, C5, C#5, D5, D#5, E5, F5 ONLY
-- NEVER EVER go higher than F5! No G5, A5, B5, C6 - those are TOO HIGH!
-- NO SCALES! Scales are BORING! Don't play E-F-G-A-B or C-D-E-F or any stepwise patterns!
-- Use LEAPS (3rds, 4ths, 5ths, octaves) - jump around, don't walk up/down stepwise!
-- RHYTHM IS KEY: Use 30-50% rests - leave space between phrases!
-- Mix long notes with short bursts - vary the rhythm!
+- Recommended range: A3 to F5 (typical tenor sax range)
+- Create interesting melodies with varied intervals and rhythms
+- Use space - include rests between phrases for breathing
+- Use ^ (tie) to hold longer melodic notes
 - Velocity: 70-90 typical, accents up to 100
 
-BAD EXAMPLE (boring scale - DON'T DO THIS):
-1 C4:75
-2 D4:75
-3 E4:75
-4 F4:75
-5 G4:75
-6 A4:75
-7 B4:75
-8 C5:75
-9 D5:75
-10 E5:75
-11 F5:75
-12 G5:75
-13 A5:75
-14 B5:75
-15 C6:75
-16 D6:75
-
-GOOD EXAMPLE 1 - Bebop (leaps, space, variety):
+EXAMPLE 1 - Bebop style (leaps, space, variety, uses ^ for longer notes):
 1 .
 2 .
 3 E4:85
-4 .
+4 ^
 5 B4:90
 6 G4:75
 7 .
 8 E4:80
-9 .
+9 ^
 10 .
 11 C5:85
-12 .
+12 ^
 13 A4:70
 14 .
 15 .
 16 .
 17 D5:85
-18 .
-19 .
+18 ^
+19 ^
 20 B4:80
 21 .
 22 G4:75
 23 D4:70
-24 .
+24 ^
 25 .
 26 E4:85
 27 .
 28 C5:90
-29 .
-30 .
+29 ^
+30 ^
 31 A4:75
 32 .
 
-GOOD EXAMPLE 2 - Blues phrase (repetition with variation):
+EXAMPLE 2 - Blues phrase (repetition with variation):
 1 .
 2 D4:75
 3 D4:80
@@ -365,15 +343,15 @@ def get_batched_quartet_prompt(previous_context: str = "") -> str:
 
 FORMAT RULES:
 - {steps} numbered lines per instrument (one line = one {resolution} note)
-- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80") or NUMBER . (e.g., "1 .")
+- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80"), NUMBER . (rest), or NUMBER ^ (hold previous note)
 - Chords: Multiple notes on same line (e.g., "1 C3:65,E3:62,G3:60")
+- Ties: Use ^ to hold previous note longer (e.g., "1 C2:80" then "2 ^" holds C2 across both steps)
 - Velocity: 0-127 (60-90 typical for jazz)
 
 INSTRUMENT ROLES:
 
 BASS - Walking bassline foundation
-- CRITICAL RANGE: E1, F1, F#1, G1, G#1, A1, A#1, B1, C2, C#2, D2, D#2, E2, F2, F#2, G2 ONLY
-- NEVER use A2, B2, C3 or higher than G2! You are BASS - stay LOW!
+- Recommended range: E1 to G2 (keep it low for bass sound)
 - Stepwise motion connecting chord tones
 - Emphasize roots on strong beats
 - Velocity: 70-85
@@ -385,19 +363,17 @@ DRUMS - Swing rhythm (General MIDI drum map)
 - Velocity: Kick/Snare 85-95, Cymbals 50-70
 
 PIANO - Chord comping
-- Range: C3 to C5
+- Recommended range: C3 to C5 (mid-range for comping)
 - Jazz voicings (7ths, 9ths), syncopated rhythm
 - Leave space - don't play every beat
 - Velocity: 60-75
 
 SAX - Lead melody and improvisation
 - MONOPHONIC: ONE note per line (saxes can't play chords!)
-- CRITICAL RANGE: A3 to F5 ONLY (A3, A#3, B3, C4...E5, F5)
-- NEVER go higher than F5! No G5, A5, B5 - TOO HIGH!
-- NO SCALES! Don't play stepwise patterns (E-F-G-A-B)!
-- Use LEAPS (3rds, 4ths, 5ths, octaves) - jump around!
-- RHYTHM IS KEY: Use 30-50% rests - leave space!
-- Mix short bursts with long notes - vary rhythm!
+- Recommended range: A3 to F5 (typical tenor sax range)
+- Create interesting melodies with varied intervals and rhythms
+- Use space - include rests between phrases
+- Use ^ (tie) to hold longer melodic notes
 - Velocity: 70-90, accents up to 100
 
 FORMAT EXAMPLE:
@@ -508,33 +484,33 @@ SAX
 1 .
 2 .
 3 E4:85
-4 .
+4 ^
 5 B4:90
 6 G4:75
 7 .
 8 E4:80
-9 .
+9 ^
 10 .
 11 C5:85
-12 .
+12 ^
 13 A4:70
 14 .
 15 .
 16 .
 17 D5:85
-18 .
-19 .
+18 ^
+19 ^
 20 B4:80
 21 .
 22 G4:75
 23 D4:70
-24 .
+24 ^
 25 .
 26 E4:85
 27 .
 28 C5:90
-29 .
-30 .
+29 ^
+30 ^
 31 A4:75
 32 .
 """

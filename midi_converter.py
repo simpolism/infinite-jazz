@@ -98,8 +98,8 @@ class MIDIConverter:
             program = self._get_program(instrument_name)
             track.append(mido.Message('program_change', program=program, channel=channel, time=0))
 
-        # Track active notes for sustain mode (future)
-        active_notes = set()
+        # Track active notes (for both trigger and sustain modes)
+        active_notes = {}  # pitch -> (velocity, start_time)
 
         # Convert each step
         current_time = 0  # Absolute time position in ticks
@@ -108,9 +108,34 @@ class MIDIConverter:
             step_start_time = self._calculate_swing_time(step_idx)
 
             if config.NOTE_MODE == 'trigger':
-                # Trigger mode: note on, then note off after step duration
-                if not step.is_rest:
-                    # Note-on events at step start
+                # Trigger mode with tie support: notes hold across ties (^)
+
+                if step.is_tie:
+                    # Tie: continue previous notes, don't emit any events
+                    # Just advance time
+                    pass
+
+                elif not step.is_rest:
+                    # New note(s): turn off any active notes first, then start new ones
+
+                    # Turn off active notes
+                    if active_notes:
+                        time_offset = max(0, step_start_time - current_time)
+                        first_delta = True
+                        for note_pitch in list(active_notes.keys()):
+                            delta_time = time_offset if first_delta else 0
+                            track.append(mido.Message(
+                                'note_off',
+                                note=note_pitch,
+                                velocity=0,
+                                channel=channel,
+                                time=delta_time
+                            ))
+                            first_delta = False
+                        active_notes.clear()
+                        current_time = step_start_time
+
+                    # Start new notes
                     for note_idx, note in enumerate(step.notes):
                         delta_time = step_start_time - current_time if note_idx == 0 else 0
                         track.append(mido.Message(
@@ -122,22 +147,25 @@ class MIDIConverter:
                         ))
                         if note_idx == 0:
                             current_time = step_start_time
+                        active_notes[note.pitch] = (note.velocity, step_start_time)
 
-                    # Note-off events after step duration
-                    # Calculate when next step starts (accounts for swing)
-                    note_off_time = self._calculate_swing_time(step_idx + 1)
-                    for note_idx, note in enumerate(step.notes):
-                        delta_time = note_off_time - current_time if note_idx == 0 else 0
-                        track.append(mido.Message(
-                            'note_off',
-                            note=note.pitch,
-                            velocity=0,
-                            channel=channel,
-                            time=delta_time
-                        ))
-                        if note_idx == 0:
-                            current_time = note_off_time
-                # For rests, we don't emit any events, time just advances
+                else:
+                    # Rest: turn off any active notes
+                    if active_notes:
+                        time_offset = max(0, step_start_time - current_time)
+                        first_delta = True
+                        for note_pitch in list(active_notes.keys()):
+                            delta_time = time_offset if first_delta else 0
+                            track.append(mido.Message(
+                                'note_off',
+                                note=note_pitch,
+                                velocity=0,
+                                channel=channel,
+                                time=delta_time
+                            ))
+                            first_delta = False
+                        active_notes.clear()
+                        current_time = step_start_time
 
             elif config.NOTE_MODE == 'sustain':
                 # Sustain mode: notes hold until next event
@@ -272,28 +300,57 @@ class MIDIConverter:
             end_step = len(track_data.steps) if num_steps is None else start_step + num_steps
             steps_to_process = track_data.steps[start_step:end_step]
 
+            # Track active notes for tie support
+            active_notes = {}  # pitch -> (velocity, start_time)
+
             # Generate note events
             for step_idx, step in enumerate(steps_to_process):
                 absolute_step = start_step + step_idx
                 step_time = self._calculate_swing_time_seconds(absolute_step, time_per_step)
 
-                if not step.is_rest:
+                if step.is_tie:
+                    # Tie: continue previous notes, don't emit any events
+                    pass
+
+                elif not step.is_rest:
+                    # New note(s): turn off any active notes first, then start new ones
+
+                    # Turn off active notes
+                    if active_notes and config.NOTE_MODE == 'trigger':
+                        for note_pitch in list(active_notes.keys()):
+                            messages.append((
+                                step_time,
+                                mido.Message('note_off', note=note_pitch, velocity=0, channel=channel)
+                            ))
+                        active_notes.clear()
+
                     # Note on
                     for note in step.notes:
                         messages.append((
                             step_time,
                             mido.Message('note_on', note=note.pitch, velocity=note.velocity, channel=channel)
                         ))
+                        active_notes[note.pitch] = (note.velocity, step_time)
 
-                    # Note off (for trigger mode)
-                    if config.NOTE_MODE == 'trigger':
-                        # Note off at the next step's time (accounts for swing)
-                        note_off_time = self._calculate_swing_time_seconds(absolute_step + 1, time_per_step)
-                        for note in step.notes:
+                else:
+                    # Rest: turn off any active notes
+                    if active_notes and config.NOTE_MODE == 'trigger':
+                        for note_pitch in list(active_notes.keys()):
                             messages.append((
-                                note_off_time,
-                                mido.Message('note_off', note=note.pitch, velocity=0, channel=channel)
+                                step_time,
+                                mido.Message('note_off', note=note_pitch, velocity=0, channel=channel)
                             ))
+                        active_notes.clear()
+
+            # Turn off any remaining active notes at the end
+            if active_notes and config.NOTE_MODE == 'trigger':
+                final_step = start_step + len(steps_to_process)
+                final_time = self._calculate_swing_time_seconds(final_step, time_per_step)
+                for note_pitch in active_notes.keys():
+                    messages.append((
+                        final_time,
+                        mido.Message('note_off', note=note_pitch, velocity=0, channel=channel)
+                    ))
 
         # Sort by time
         messages.sort(key=lambda x: x[0])

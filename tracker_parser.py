@@ -20,6 +20,7 @@ class TrackerStep:
     """Represents one time step in the tracker"""
     notes: List[Note]  # Empty list = rest
     is_rest: bool
+    is_tie: bool = False  # True = continue previous note (^)
 
 
 @dataclass
@@ -72,15 +73,19 @@ class TrackerParser:
         return midi_num
 
     @staticmethod
-    def parse_note_entry(entry: str) -> List[Note]:
+    def parse_note_entry(entry: str) -> tuple[List[Note], bool]:
         """
         Parse a single note entry (can be chord)
         Examples:
-          "C4:80" -> [Note(60, 80)]
-          "C4:70,E4:65,G4:68" -> [Note(60, 70), Note(64, 65), Note(67, 68)]
-          "C4:70,E4:65," -> [Note(60, 70), Note(64, 65)] (trailing comma ignored)
-          "C4:70." -> [Note(60, 70)] (trailing period ignored)
-          "." -> [] (rest)
+          "C4:80" -> ([Note(60, 80)], False)
+          "C4:70,E4:65,G4:68" -> ([Note(60, 70), Note(64, 65), Note(67, 68)], False)
+          "C4:70,E4:65," -> ([Note(60, 70), Note(64, 65)], False) (trailing comma ignored)
+          "C4:70." -> ([Note(60, 70)], False) (trailing period ignored)
+          "." -> ([], False) (rest)
+          "^" -> ([], True) (tie - continue previous note)
+
+        Returns:
+            Tuple of (notes list, is_tie flag)
         """
         entry = entry.strip()
 
@@ -88,8 +93,12 @@ class TrackerParser:
         entry = entry.rstrip('.,;')
         entry = entry.strip()
 
+        # Check for tie notation
+        if entry == '^':
+            return ([], True)
+
         if entry == '.' or entry == '':
-            return []
+            return ([], False)
 
         notes = []
         for note_str in entry.split(','):
@@ -126,7 +135,7 @@ class TrackerParser:
 
             notes.append(Note(pitch=pitch, velocity=velocity))
 
-        return notes
+        return (notes, False)
 
     @staticmethod
     def parse_track(instrument: str, lines: List[str]) -> InstrumentTrack:
@@ -150,9 +159,9 @@ class TrackerParser:
             line = re.sub(r'^\d+\.?\s+', '', line)
 
             try:
-                notes = TrackerParser.parse_note_entry(line)
-                is_rest = len(notes) == 0
-                steps.append(TrackerStep(notes=notes, is_rest=is_rest))
+                notes, is_tie = TrackerParser.parse_note_entry(line)
+                is_rest = len(notes) == 0 and not is_tie
+                steps.append(TrackerStep(notes=notes, is_rest=is_rest, is_tie=is_tie))
             except ValueError as e:
                 raise ValueError(f"Error in {instrument} track, line {line_num}: {e}")
 
