@@ -1,11 +1,9 @@
 """
-LLM interface for music generation
-Primary: Ollama (easy install, great performance)
-Alternative: llama-cpp-python (if you prefer manual setup)
+LLM interface for music generation.
+Supports Ollama for local inference and OpenAI-compatible APIs (e.g., Groq).
 """
 
 from typing import Optional, Dict, Any
-from pathlib import Path
 import time
 
 
@@ -94,86 +92,6 @@ class OllamaBackend:
         tps = tokens_generated / gen_time if gen_time > 0 else 0
 
         print(f"Generated ~{int(tokens_generated)} tokens in {gen_time:.2f}s ({tps:.1f} tokens/sec)")
-
-        return text
-
-
-class LlamaCppBackend:
-    """llama-cpp-python backend - alternative if you have it installed"""
-
-    def __init__(
-        self,
-        model_path: str,
-        n_ctx: int = 2048,
-        n_gpu_layers: int = -1,
-        n_threads: Optional[int] = None,
-        verbose: bool = False
-    ):
-        """Initialize llama-cpp-python backend"""
-        try:
-            from llama_cpp import Llama
-        except ImportError:
-            raise ImportError(
-                "llama-cpp-python not installed. Install with:\n"
-                "  pip install llama-cpp-python\n"
-                "For GPU support (CUDA):\n"
-                "  CMAKE_ARGS=\"-DGGML_CUDA=on\" pip install llama-cpp-python\n"
-                "\nOr use Ollama instead (much easier):\n"
-                "  pip install ollama"
-            )
-
-        self.model_path = Path(model_path)
-        if not self.model_path.exists():
-            raise FileNotFoundError(f"Model file not found: {model_path}")
-
-        print(f"Loading model: {self.model_path}")
-        print(f"  Context size: {n_ctx}")
-        print(f"  GPU layers: {n_gpu_layers} ({'all' if n_gpu_layers == -1 else n_gpu_layers})")
-
-        start_time = time.time()
-
-        self.llm = Llama(
-            model_path=str(self.model_path),
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            n_threads=n_threads,
-            verbose=verbose
-        )
-
-        load_time = time.time() - start_time
-        print(f"Model loaded in {load_time:.2f}s")
-
-    def generate(
-        self,
-        prompt: str,
-        max_tokens: int = 256,
-        temperature: float = 0.8,
-        top_p: float = 0.95,
-        top_k: int = 40,
-        repeat_penalty: float = 1.1,
-        stop: Optional[list] = None,
-        **kwargs
-    ) -> str:
-        """Generate text from prompt"""
-        start_time = time.time()
-
-        output = self.llm(
-            prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            repeat_penalty=repeat_penalty,
-            stop=stop or [],
-            echo=False
-        )
-
-        gen_time = time.time() - start_time
-        text = output['choices'][0]['text']
-        tokens_generated = output['usage']['completion_tokens']
-        tps = tokens_generated / gen_time if gen_time > 0 else 0
-
-        print(f"Generated {tokens_generated} tokens in {gen_time:.2f}s ({tps:.1f} tokens/sec)")
 
         return text
 
@@ -357,9 +275,8 @@ class LLMInterface:
         Args:
             model: Model identifier
                    For Ollama: model name (e.g., "qwen2.5:3b", "phi3:mini")
-                   For llama.cpp: path to GGUF file
-                   For OpenAI: model name (e.g., "gpt-3.5-turbo", "llama-3.1-70b-versatile")
-            backend: "auto", "ollama", "llama-cpp", or "openai"
+                   For OpenAI-compatible APIs: model name (e.g., "gpt-4.1-mini", "llama-3.1-70b-versatile")
+            backend: "auto", "ollama", or "openai"
             **kwargs: Backend-specific options
                       For OpenAI: api_key, base_url
         """
@@ -368,22 +285,13 @@ class LLMInterface:
 
         # Auto-detect backend
         if backend == "auto":
-            # Check if model looks like a file path
-            if Path(model).exists() or model.endswith('.gguf'):
-                backend = "llama-cpp"
-            else:
-                backend = "ollama"
+            backend = "ollama"
 
         # Initialize backend
         if backend == "ollama":
             print(f"Using Ollama backend")
             self.backend = OllamaBackend(model_name=model, **kwargs)
             self.backend_name = "ollama"
-
-        elif backend == "llama-cpp":
-            print(f"Using llama-cpp-python backend")
-            self.backend = LlamaCppBackend(model_path=model, **kwargs)
-            self.backend_name = "llama-cpp"
 
         elif backend == "openai":
             print(f"Using OpenAI-compatible API backend")
@@ -396,56 +304,6 @@ class LLMInterface:
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate text from prompt"""
         return self.backend.generate(prompt, **kwargs)
-
-
-class GenerationConfig:
-    """Configuration for music generation"""
-
-    # Default generation parameters
-    # Note: High max_tokens values for reasoning models (like gpt-oss-20b)
-    # that use tokens for internal chain-of-thought
-    BASS_CONFIG = {
-        'max_tokens': 1000,  # Increased for reasoning models
-        'temperature': 0.7,
-        'top_p': 0.9,
-        'repeat_penalty': 1.15,
-        'stop': ['\n\nDRUMS', '\n\nPIANO', '\n\nSAX']
-    }
-
-    DRUMS_CONFIG = {
-        'max_tokens': 1000,  # Increased for reasoning models
-        'temperature': 0.8,
-        'top_p': 0.9,
-        'repeat_penalty': 1.1,
-        'stop': ['\n\nPIANO', '\n\nSAX', '\n\nBASS']
-    }
-
-    PIANO_CONFIG = {
-        'max_tokens': 1000,  # Increased for reasoning models
-        'temperature': 0.75,
-        'top_p': 0.92,
-        'repeat_penalty': 1.12,
-        'stop': ['\n\nSAX', '\n\nBASS', '\n\nDRUMS']
-    }
-
-    SAX_CONFIG = {
-        'max_tokens': 1000,  # Increased for reasoning models
-        'temperature': 0.85,
-        'top_p': 0.95,
-        'repeat_penalty': 1.1,
-        'stop': ['\n\nBASS', '\n\nDRUMS', '\n\nPIANO']
-    }
-
-    @classmethod
-    def get_config(cls, instrument: str) -> Dict[str, Any]:
-        """Get generation config for instrument"""
-        configs = {
-            'BASS': cls.BASS_CONFIG,
-            'DRUMS': cls.DRUMS_CONFIG,
-            'PIANO': cls.PIANO_CONFIG,
-            'SAX': cls.SAX_CONFIG
-        }
-        return configs.get(instrument, cls.BASS_CONFIG).copy()
 
 
 # Recommended models for Ollama
@@ -490,19 +348,3 @@ def list_ollama_models():
         print("Ollama not installed. Install with: pip install ollama")
     except Exception as e:
         print(f"Error listing models: {e}")
-
-
-def find_model(model_dir: str = "models") -> Optional[Path]:
-    """
-    Find a GGUF model in the models directory
-    Returns the first .gguf file found
-    """
-    model_path = Path(model_dir)
-    if not model_path.exists():
-        return None
-
-    gguf_files = list(model_path.glob("*.gguf"))
-    if gguf_files:
-        return gguf_files[0]
-
-    return None

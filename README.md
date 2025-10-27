@@ -1,34 +1,72 @@
-# JazzAI - Real-time Jazz Quartet Generator
+# Infinite Jazz – Realtime Quartet Generator
 
-AI-powered real-time jazz quartet using local LLMs and MIDI output.
+Infinite Jazz stitches together large-language-model composition, tracker parsing, MIDI conversion, and live playback to improvise an endless jazz quartet. Each cycle generates two bars for bass, drums, piano, and sax in a single batched LLM call, buffers the result, and streams it out with tight timing.
 
-## Architecture
+> ⚡ **For real-time responsiveness, use Groq (OpenAI-compatible API).** Ollama remains available for local experimentation but does not guarantee the throughput needed for low-latency playback.
 
-**Hardware:**
-- Target: Nvidia 4070 Ti Super 16GB
-- Goal: 100+ TPS with 3B model (Phi-3, Qwen 2.5, or Llama 3.2)
-- Output: MIDI → FluidSynth (software) or Yamaha TG-33 (hardware)
+---
 
-**Approach:**
-- Single LLM, 4 sequential passes per generation cycle
-- Generate 2 bars at a time per instrument
-- Call-and-response: Each instrument sees previous instruments' output
-- Buffer ahead while current bars play
+## Quickstart
 
-**Instruments:**
-- Bass (MIDI channel 0)
-- Drums (MIDI channel 9, General MIDI Level 1)
-- Piano (MIDI channel 1)
-- Sax (MIDI channel 2)
+### 1. Install Python dependencies
 
-**LLM Backend:**
-- Primary: **Ollama** (easiest setup, great performance)
-- Alternative: llama-cpp-python (manual model management)
-- Alternative: **OpenAI-compatible APIs** (Groq, OpenAI, etc. for fast cloud inference)
+```bash
+pip install -r requirements.txt
+```
 
-## Tracker Format
+Optional software synth:
 
-Ultra-minimal text format for music notation:
+```bash
+# Debian / Ubuntu
+sudo apt-get install fluidsynth
+
+# macOS
+brew install fluid-synth
+```
+
+### 2. Pick an inference backend
+
+**Groq (recommended)**
+```bash
+export GROQ_API_KEY="your_api_key"
+python realtime_jazz.py \
+  --llm-backend openai \
+  --model llama-3.1-70b-versatile \
+  --base-url https://api.groq.com/openai/v1 \
+  -n 4
+```
+
+**Ollama (local)**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh   # one-time install
+ollama serve                                   # separate terminal
+python realtime_jazz.py -m qwen2.5:3b -n 4
+```
+
+### 3. Useful flags
+
+- `--tempo 140` – override BPM for generation + playback
+- `--save-output --output-dir output/` – persist tracker text and combined MIDI
+- `--backend {fluidsynth|hardware|virtual}` – route MIDI to software, hardware, or a DAW
+- `--list-ports` – inspect available MIDI outputs before selecting `--backend hardware`
+
+Stop playback with `Ctrl+C`; the app drains the buffer and exits cleanly.
+
+---
+
+## Architecture Overview
+
+1. **Prompting** – `prompts.py` builds a single quartet prompt describing formatting and stylistic guidance.
+2. **Generation** – `generator.GenerationPipeline` calls the LLM, parses the response into structured tracks, and keeps a short history for continuity.
+3. **Buffering** – `generator.ContinuousGenerator` maintains a queue of upcoming sections so playback never waits on inference.
+4. **Conversion** – `midi_converter.MIDIConverter` converts tracker steps to MIDI events on a fixed 16th-note grid with optional swing.
+5. **Playback** – `RealtimeJazzGenerator` schedules events and streams them through audio backends (FluidSynth, hardware MIDI, or a virtual port).
+
+The whole loop runs continuously: while one section plays, the system composes the next ones in the background.
+
+---
+
+## Tracker Format (LLM ↔ Pipeline)
 
 ```
 BASS
@@ -38,231 +76,98 @@ E2:75
 .
 
 DRUMS
-C1:90,F#1:60
-F#1:50
+C2:90,D#3:60
+.
 
 PIANO
 C3:65,E3:60,G3:62
 .
 
 SAX
-E4:70
-G4:75
+E4:78
+.
 ```
 
-**Format Rules:**
-- Section headers: `BASS`, `DRUMS`, `PIANO`, `SAX`
-- One line per time step (8th or 16th note resolution)
-- Note format: `NOTE:VELOCITY` (e.g., `C4:80`)
-- Chords: Comma-separated notes (e.g., `C4:70,E4:65,G4:68`)
-- Rests: `.` or blank line
-- Velocity range: 0-127
+- Four instrument headers (`BASS`, `DRUMS`, `PIANO`, `SAX`)
+- 16th-note resolution, `config.get_total_steps()` lines per instrument
+- Notes: `NOTE:VELOCITY` (e.g., `C4:80`)
+- Chords: comma separated (piano voicings)
+- Rests: `.`
+- Ties: `^` to continue the previous note
+- Velocity range: 0–127 (typical swing accents around 70–95)
 
-**General MIDI Level 1 Drums:**
-- C2 (36): Kick
-- D2 (38): Snare
-- F#2 (42): Closed Hi-Hat
-- A#2 (46): Open Hi-Hat
-- A2 (45): Low Tom
-- C3 (48): Mid Tom
-- D3 (50): High Tom
-- C#3 (49): Crash
-- D#3 (51): Ride
+---
 
-## Quick Start
-
-```bash
-# 1. Install Python dependencies
-pip install -r requirements.txt
-
-# 2. Install Ollama
-# Linux:
-curl -fsSL https://ollama.com/install.sh | sh
-# macOS:
-brew install ollama
-# Windows: Download from https://ollama.com/download
-
-# 3. Start Ollama server (in separate terminal)
-ollama serve
-
-# 4. Install FluidSynth (for audio output)
-# Ubuntu/Debian:
-sudo apt-get install fluidsynth
-# macOS:
-brew install fluid-synth
-# Windows: Download from https://www.fluidsynth.org/
-
-# 5. Run JazzAI! (auto-downloads model on first run)
-python realtime_jazz.py -m qwen2.5:3b -n 4
-```
-
-See [SETUP.md](SETUP.md) for detailed instructions.
-
-## Usage
-
-### Real-time Generation
-
-```bash
-# Basic usage with qwen2.5:3b (recommended)
-python realtime_jazz.py -m qwen2.5:3b -n 4
-
-# Try different model
-python realtime_jazz.py -m phi3:mini -n 4
-
-# Save generated sections
-python realtime_jazz.py -m qwen2.5:3b --save-output
-
-# Change tempo
-python realtime_jazz.py -m qwen2.5:3b --tempo 140
-
-# Use 16th note resolution
-python realtime_jazz.py -m qwen2.5:3b --resolution 16th
-
-# List available models
-python realtime_jazz.py --list-models
-
-# Hardware MIDI output (e.g., Yamaha TG-33)
-python realtime_jazz.py -m qwen2.5:3b --backend hardware --port "Your MIDI Device"
-
-# Use Groq for fast cloud inference (requires API key)
-export GROQ_API_KEY="your_groq_api_key"
-python realtime_jazz.py --llm-backend openai -m llama-3.1-70b-versatile \
-  --base-url https://api.groq.com/openai/v1 --api-key $GROQ_API_KEY -n 4
-
-# Use OpenAI GPT models (requires API key)
-export OPENAI_API_KEY="your_openai_api_key"
-python realtime_jazz.py --llm-backend openai -m gpt-3.5-turbo -n 4
-```
-
-### Test Without LLM
-
-```bash
-# Test tracker → MIDI conversion
-python test_playback.py
-
-# Test generation pipeline with mock data
-python test_generation.py
-
-# Export to MIDI file
-python test_playback.py -o output.mid
-```
-
-### Configuration
-
-Edit `config.py` to customize:
+## Configuration Highlights (`config.py`)
 
 ```python
-TEMPO = 120              # BPM
-RESOLUTION = '8th'       # '8th' or '16th' notes
-NOTE_MODE = 'trigger'    # 'trigger' or 'sustain'
-BARS_PER_GENERATION = 2  # Bars per LLM generation
+TEMPO = 120              # BPM (override with --tempo)
+NOTE_MODE = 'trigger'    # or 'sustain'
+BARS_PER_GENERATION = 2
+SWING_ENABLED = True
+SWING_RATIO = 0.67       # 2:1 swing feel
 ```
 
-## Project Structure
+Other constants define MIDI channel routing, allowable pitch ranges per instrument, and tick resolution. Update the module and restart the process to apply changes.
+
+---
+
+## Command Reference
+
+```bash
+# Use Groq with a different model
+python realtime_jazz.py --llm-backend openai \
+  --model gemma-9b-it \
+  --base-url https://api.groq.com/openai/v1 \
+  --api-key $GROQ_API_KEY
+
+# Save every generated section plus a stitched MIDI file
+python realtime_jazz.py --save-output --output-dir recordings/
+
+# Drive a DAW via a virtual MIDI port
+python realtime_jazz.py --backend virtual
+
+# Send MIDI to hardware (after checking ports)
+python realtime_jazz.py --list-ports
+python realtime_jazz.py --backend hardware --port "Yamaha TG-33"
+```
+
+---
+
+## Repository Layout
 
 ```
-jazzai/
-├── config.py              # Configuration settings
-├── tracker_parser.py      # Parse tracker format to structured data
-├── midi_converter.py      # Convert tracker to MIDI
-├── audio_output.py        # Audio backends (FluidSynth, hardware, virtual)
-├── llm_interface.py       # LLM integration (TODO)
-├── generator.py           # Generation pipeline (TODO)
-├── test_playback.py       # Test script
-├── examples/
-│   └── test_pattern.txt   # Example tracker pattern
-└── requirements.txt       # Python dependencies
+infinite_jazz/
+├── realtime_jazz.py   # CLI entrypoint & orchestration
+├── generator.py       # Batched LLM pipeline & buffering
+├── prompts.py         # Quartet prompt template
+├── tracker_parser.py  # Tracker text → structured tracks
+├── midi_converter.py  # Tracker → MIDI (file + realtime)
+├── audio_output.py    # FluidSynth / hardware / virtual backends
+├── llm_interface.py   # Ollama + OpenAI-compatible API adapters
+├── config.py          # Musical & timing configuration
+├── txt_to_midi.py     # Convert archived tracker text to MIDI
+└── requirements.txt
 ```
 
-## Components
+---
 
-### tracker_parser.py
-Parses text tracker format into structured Python objects.
+## Tuning & Extensibility
 
-**Key functions:**
-- `parse_tracker(text)`: Parse complete tracker file
-- `TrackerParser.note_to_midi(note)`: Convert note names to MIDI numbers
+- **Prompt tweaks** – edit `prompts.py` to push the quartet toward different eras, ranges, or rhythmic feels.
+- **Generation parameters** – adjust `max_tokens`, `temperature`, or `top_p` in `generator.py` to balance creativity and format adherence.
+- **Playback backends** – implement the `AudioBackend` interface in `audio_output.py` to add new destinations (e.g., WebMIDI, OSC).
+- **Persistence / streaming** – extend `RealtimeJazzGenerator` to stream tracker text or MIDI to external consumers.
 
-### midi_converter.py
-Converts parsed tracker data to MIDI.
+---
 
-**Key classes:**
-- `MIDIConverter`: Main converter class
-- `create_midi_file()`: Generate mido.MidiFile
-- `create_realtime_messages()`: Generate timed MIDI messages for playback
+## Troubleshooting
 
-**Features:**
-- Configurable resolution (8th/16th notes)
-- Trigger or sustain mode
-- Proper MIDI timing with ticks
+- **Playback stutters** – Groq model may be too slow; choose a faster variant or increase `ContinuousGenerator.buffer_size`.
+- **No sound** – ensure FluidSynth is installed (or switch to `--backend hardware/virtual`).
+- **Ollama outputs empty sections** – smaller local models sometimes struggle with strict formatting; Groq/OpenAI models are more reliable.
 
-### audio_output.py
-Audio output backends with unified interface.
-
-**Backends:**
-- `FluidSynthBackend`: Software synthesis
-- `HardwareMIDIBackend`: External MIDI hardware (e.g., Yamaha TG-33)
-- `VirtualMIDIBackend`: Virtual MIDI port for DAWs
-
-**Key classes:**
-- `RealtimePlayer`: Buffer and play MIDI messages with precise timing
-- `play_midi_file()`: Simple MIDI file playback
-
-## Design Decisions
-
-### Configurable Resolution
-Resolution is configurable between 8th and 16th notes. All timing calculations are centralized in `config.py`:
-- `get_ticks_per_step()`: MIDI ticks per tracker step
-- `get_steps_per_bar()`: Tracker steps per bar
-- Change `RESOLUTION` in config.py or use `--resolution` flag
-
-### Note Duration Modes
-
-**Trigger mode** (current default):
-- Each note plays for exactly one time step
-- Simple and predictable
-- Good for LLM to learn
-
-**Sustain mode** (future):
-- Notes hold until next event
-- More expressive
-- Requires careful LLM prompting
-- Set `NOTE_MODE = 'sustain'` in config.py
-
-### Backend Abstraction
-All audio backends implement `AudioBackend` interface:
-- Easy to swap between FluidSynth, hardware, or virtual MIDI
-- Add new backends by implementing `send_message()` and `close()`
-- Future: Add latency compensation, MIDI clock sync
-
-## Customization
-
-1. **Prompts** (prompts.py)
-   - Edit instrument-specific prompts
-   - Change musical style and guidelines
-   - Add examples in tracker format
-
-2. **Generation Config** (llm_interface.py)
-   - Adjust temperature, top_p for each instrument
-   - Tune creativity vs consistency
-   - Modify stop sequences
-
-3. **Music Config** (config.py)
-   - Change tempo, time signature
-   - Adjust bars per generation
-   - Switch resolution (8th/16th notes)
-
-4. **LLM Backend**
-   - Try different models (qwen2.5:3b, phi3:mini, llama3.2:3b)
-   - Use llama-cpp-python for manual model management
-   - Use OpenAI-compatible APIs (Groq, OpenAI) for cloud inference
-   - Adjust context window size
-
-## Performance Targets
-
-- **Inference**: 100+ TPS with 3B model
-- **Latency**: Generate 2 bars before current playback ends
-- **Timing**: Sub-millisecond MIDI timing accuracy
+---
 
 ## License
 

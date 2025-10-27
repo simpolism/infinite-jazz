@@ -1,12 +1,14 @@
 """
-Configuration for JazzAI real-time jazz quartet generator
+Configuration for Infinite Jazz real-time quartet generator
 """
 
 from tracker_parser import TrackerParser
 
 # Timing configuration
 TEMPO = 120  # BPM
-RESOLUTION = '16th'  # '8th' or '16th' note resolution
+# Tracker uses fixed 16th-note resolution
+RESOLUTION = '16th'
+# Fixed 16th-note resolution for tracker steps
 
 # Note duration mode
 NOTE_MODE = 'trigger'  # 'trigger' or 'sustain'
@@ -53,28 +55,14 @@ TIME_SIGNATURE = (4, 4)  # 4/4 time
 
 
 def get_ticks_per_step():
-    """Calculate MIDI ticks per tracker step based on resolution"""
-    beats_per_bar = TIME_SIGNATURE[0]
-
-    if RESOLUTION == '8th':
-        steps_per_beat = 2
-    elif RESOLUTION == '16th':
-        steps_per_beat = 4
-    else:
-        raise ValueError(f"Unknown resolution: {RESOLUTION}")
-
-    # Ticks per step = ticks per beat / steps per beat
+    """MIDI ticks per tracker step (fixed to 16th-note resolution)"""
+    steps_per_beat = 4  # 16th notes
     return TICKS_PER_BEAT // steps_per_beat
 
 
 def get_steps_per_bar():
-    """Get number of tracker steps per bar"""
-    if RESOLUTION == '8th':
-        return TIME_SIGNATURE[0] * 2  # 8 steps for 4/4
-    elif RESOLUTION == '16th':
-        return TIME_SIGNATURE[0] * 4  # 16 steps for 4/4
-    else:
-        raise ValueError(f"Unknown resolution: {RESOLUTION}")
+    """Number of tracker steps per bar (fixed 16th-note grid)"""
+    return TIME_SIGNATURE[0] * 4  # 16th notes in 4/4
 
 
 def get_total_steps():

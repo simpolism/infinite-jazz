@@ -37,7 +37,6 @@ class RealtimeJazzGenerator:
         audio_backend,
         save_output: bool = False,
         output_dir: str = "output",
-        batched: bool = True,
         verbose: bool = False
     ):
         """
@@ -48,7 +47,6 @@ class RealtimeJazzGenerator:
             audio_backend: AudioBackend instance
             save_output: Save generated sections to files
             output_dir: Directory for saved output
-            batched: Use batched generation (all instruments at once)
             verbose: Print generation details
         """
         self.llm = llm
@@ -63,7 +61,7 @@ class RealtimeJazzGenerator:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving outputs to {self.output_dir}")
 
-        self.generator = ContinuousGenerator(llm, batched=batched, verbose=verbose)  # Uses default buffer_size
+        self.generator = ContinuousGenerator(llm, verbose=verbose)  # Uses default buffer_size
         self.midi_converter = MIDIConverter(tempo=config.TEMPO)
 
         self.section_count = 0
@@ -138,10 +136,7 @@ class RealtimeJazzGenerator:
     def _calculate_section_duration_from_steps(self, num_steps: int) -> float:
         """Calculate duration in seconds for a given number of steps"""
         beats_per_second = config.TEMPO / 60.0
-        if config.RESOLUTION == '8th':
-            steps_per_beat = 2
-        else:  # 16th
-            steps_per_beat = 4
+        steps_per_beat = 4  # Fixed 16th-note grid
 
         time_per_step = 1.0 / (beats_per_second * steps_per_beat)
         return num_steps * time_per_step
@@ -154,10 +149,10 @@ class RealtimeJazzGenerator:
             num_sections: Number of sections to generate (None = infinite)
         """
         print(f"\n{'='*60}")
-        print(f"JazzAI - Real-time Jazz Quartet Generator")
+        print(f"Infinite Jazz - Real-time Quartet Generator")
         print(f"{'='*60}")
         print(f"Tempo: {config.TEMPO} BPM")
-        print(f"Resolution: {config.RESOLUTION} notes")
+        print("Resolution: 16th notes")
         print(f"Bars per section: {config.BARS_PER_GENERATION}")
         print(f"{'='*60}\n")
 
@@ -318,11 +313,11 @@ Examples:
     parser.add_argument(
         '-m', '--model',
         default='qwen2.5:3b',
-        help='Model identifier: Ollama model name (e.g., qwen2.5:3b), GGUF file path, or OpenAI model name (e.g., gpt-3.5-turbo, llama-3.1-70b-versatile) (default: qwen2.5:3b)'
+        help='Model identifier: Ollama model name (e.g., qwen2.5:3b) or OpenAI-compatible model name (e.g., gpt-4.1-mini, llama-3.1-70b-versatile) (default: qwen2.5:3b)'
     )
     parser.add_argument(
         '--llm-backend',
-        choices=['auto', 'ollama', 'llama-cpp', 'openai'],
+        choices=['auto', 'ollama', 'openai'],
         default='auto',
         help='LLM backend to use (default: auto-detect)'
     )
@@ -375,33 +370,10 @@ Examples:
         help=f'Tempo in BPM (default: {config.TEMPO})'
     )
     parser.add_argument(
-        '--resolution',
-        choices=['8th', '16th'],
-        help=f'Note resolution (default: {config.RESOLUTION})'
-    )
-    parser.add_argument(
-        '--gpu-layers',
-        type=int,
-        default=-1,
-        help='GPU layers to offload (-1 = all, default: -1)'
-    )
-    parser.add_argument(
-        '--ctx-size',
-        type=int,
-        default=2048,
-        help='Context window size (default: 2048)'
-    )
-    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging for debugging'
     )
-    parser.add_argument(
-        '--sequential',
-        action='store_true',
-        help='Use sequential generation (bass→drums→piano→sax) instead of batched (default: batched)'
-    )
-
     args = parser.parse_args()
 
     # List models and exit
@@ -417,8 +389,6 @@ Examples:
     # Override config
     if args.tempo:
         config.TEMPO = args.tempo
-    if args.resolution:
-        config.RESOLUTION = args.resolution
 
     # Initialize LLM
     print(f"\n{'='*60}")
@@ -428,13 +398,7 @@ Examples:
     try:
         # Prepare kwargs based on backend
         llm_kwargs = {}
-        if args.llm_backend == 'llama-cpp':
-            llm_kwargs = {
-                'n_ctx': args.ctx_size,
-                'n_gpu_layers': args.gpu_layers,
-                'verbose': False
-            }
-        elif args.llm_backend == 'openai':
+        if args.llm_backend == 'openai':
             if args.api_key:
                 llm_kwargs['api_key'] = args.api_key
             if args.base_url:
@@ -451,7 +415,6 @@ Examples:
         print("  - For Ollama: Make sure Ollama is installed and running")
         print("    Install: curl -fsSL https://ollama.com/install.sh | sh")
         print("    Start: ollama serve")
-        print("  - For llama-cpp: Make sure model file exists")
         print("  - For OpenAI/Groq: Make sure API key is set and base-url is correct")
         print("    Set OPENAI_API_KEY env var or use --api-key")
         print("  - Use --list-models to see available Ollama models")
@@ -483,7 +446,6 @@ Examples:
         audio_backend=backend,
         save_output=args.save_output,
         output_dir=args.output_dir,
-        batched=not args.sequential,  # Default to batched unless --sequential is passed
         verbose=args.verbose
     )
 

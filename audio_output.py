@@ -206,7 +206,7 @@ class VirtualMIDIBackend(AudioBackend):
     Useful for connecting to DAWs or other software
     """
 
-    def __init__(self, port_name: str = "JazzAI"):
+    def __init__(self, port_name: str = "Infinite Jazz"):
         """
         Initialize virtual MIDI port
         Args:

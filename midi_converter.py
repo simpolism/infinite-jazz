@@ -1,6 +1,6 @@
 """
 MIDI converter: Converts tracker format to MIDI
-Supports configurable resolution and note duration modes
+Uses fixed 16th-note resolution with optional swing feel
 """
 
 import mido
@@ -36,7 +36,7 @@ class MIDIConverter:
         Returns:
             Time in MIDI ticks
         """
-        if not config.SWING_ENABLED or config.RESOLUTION != '16th':
+        if not config.SWING_ENABLED:
             # No swing, or not 16th notes - use straight timing
             return step_idx * self.ticks_per_step
 
@@ -227,7 +227,7 @@ class MIDIConverter:
         Returns:
             Time in seconds
         """
-        if not config.SWING_ENABLED or config.RESOLUTION != '16th':
+        if not config.SWING_ENABLED:
             # No swing, or not 16th notes - use straight timing
             return step_idx * time_per_step
 
@@ -280,11 +280,7 @@ class MIDIConverter:
 
         # Calculate time per step in seconds
         beats_per_second = self.tempo / 60.0
-        if config.RESOLUTION == '8th':
-            steps_per_beat = 2
-        else:  # 16th
-            steps_per_beat = 4
-
+        steps_per_beat = 4  # Fixed 16th-note resolution
         time_per_step = 1.0 / (beats_per_second * steps_per_beat)
 
         # Generate messages for each instrument
