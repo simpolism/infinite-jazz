@@ -9,13 +9,20 @@ import argparse
 import sys
 from pathlib import Path
 
+from dataclasses import replace
+
 from tracker_parser import parse_tracker
 from midi_converter import MIDIConverter
 from generator import concatenate_sections
-import config
+from config import DEFAULT_CONFIG, RuntimeConfig
 
 
-def convert_txt_to_midi(input_files: list, output_file: str = None, tempo: int = None):
+def convert_txt_to_midi(
+    input_files: list,
+    output_file: str = None,
+    tempo: int = None,
+    runtime_config: RuntimeConfig = DEFAULT_CONFIG
+):
     """
     Convert tracker text file(s) to MIDI
 
@@ -66,8 +73,9 @@ def convert_txt_to_midi(input_files: list, output_file: str = None, tempo: int =
 
     # Convert to MIDI
     print("Converting to MIDI...")
-    midi_tempo = tempo if tempo else config.TEMPO
-    converter = MIDIConverter(tempo=midi_tempo)
+    midi_config = runtime_config if tempo is None else replace(runtime_config, tempo=tempo)
+    midi_tempo = midi_config.tempo
+    converter = MIDIConverter(midi_config)
     midi_file = converter.create_midi_file(combined_tracks)
 
     # Save
@@ -113,12 +121,12 @@ Examples:
     parser.add_argument(
         '--tempo',
         type=int,
-        help=f'Tempo in BPM (default: {config.TEMPO})'
+        help=f'Tempo in BPM (default: {DEFAULT_CONFIG.tempo})'
     )
 
     args = parser.parse_args()
 
-    convert_txt_to_midi(args.input, args.output, args.tempo)
+    convert_txt_to_midi(args.input, args.output, args.tempo, DEFAULT_CONFIG)
 
 
 if __name__ == '__main__':

@@ -13,6 +13,8 @@ from pathlib import Path
 from queue import Queue, Empty
 from typing import Optional
 
+from dataclasses import replace
+
 from llm_interface import LLMInterface, list_ollama_models
 from generator import ContinuousGenerator, save_generated_section, concatenate_sections
 from midi_converter import MIDIConverter
@@ -22,7 +24,7 @@ from audio_output import (
     VirtualMIDIBackend,
     list_midi_ports
 )
-import config
+from config import RuntimeConfig, DEFAULT_CONFIG
 
 
 class RealtimeJazzGenerator:
@@ -35,6 +37,7 @@ class RealtimeJazzGenerator:
         self,
         llm: LLMInterface,
         audio_backend,
+        runtime_config: RuntimeConfig,
         save_output: bool = False,
         output_dir: str = "output",
         verbose: bool = False
@@ -45,12 +48,14 @@ class RealtimeJazzGenerator:
         Args:
             llm: LLMInterface instance
             audio_backend: AudioBackend instance
+            runtime_config: Immutable runtime configuration.
             save_output: Save generated sections to files
             output_dir: Directory for saved output
             verbose: Print generation details
         """
         self.llm = llm
         self.audio_backend = audio_backend
+        self.config = runtime_config
         self.save_output = save_output
         self.output_dir = Path(output_dir)
         self.verbose = verbose
@@ -61,8 +66,8 @@ class RealtimeJazzGenerator:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving outputs to {self.output_dir}")
 
-        self.generator = ContinuousGenerator(llm, verbose=verbose)  # Uses default buffer_size
-        self.midi_converter = MIDIConverter(tempo=config.TEMPO)
+        self.generator = ContinuousGenerator(llm, runtime_config, verbose=verbose)
+        self.midi_converter = MIDIConverter(runtime_config)
 
         self.section_count = 0
         self.is_running = False
@@ -135,7 +140,7 @@ class RealtimeJazzGenerator:
 
     def _calculate_section_duration_from_steps(self, num_steps: int) -> float:
         """Calculate duration in seconds for a given number of steps"""
-        beats_per_second = config.TEMPO / 60.0
+        beats_per_second = self.config.tempo / 60.0
         steps_per_beat = 4  # Fixed 16th-note grid
 
         time_per_step = 1.0 / (beats_per_second * steps_per_beat)
@@ -151,9 +156,9 @@ class RealtimeJazzGenerator:
         print(f"\n{'='*60}")
         print(f"Infinite Jazz - Real-time Quartet Generator")
         print(f"{'='*60}")
-        print(f"Tempo: {config.TEMPO} BPM")
+        print(f"Tempo: {self.config.tempo} BPM")
         print("Resolution: 16th notes")
-        print(f"Bars per section: {config.BARS_PER_GENERATION}")
+        print(f"Bars per section: {self.config.bars_per_generation}")
         print(f"{'='*60}\n")
 
         if num_sections is not None and num_sections <= 0:
@@ -201,7 +206,7 @@ class RealtimeJazzGenerator:
 
                 # Maintain buffer: only queue more if we're less than buffer_size sections ahead
                 max_ahead = self.generator.buffer_size * self._calculate_section_duration_from_steps(
-                    config.get_total_steps()
+                    self.config.total_steps
                 )
 
                 if ahead_by >= max_ahead:
@@ -367,7 +372,7 @@ Examples:
     parser.add_argument(
         '--tempo',
         type=int,
-        help=f'Tempo in BPM (default: {config.TEMPO})'
+        help=f'Tempo in BPM (default: {DEFAULT_CONFIG.tempo})'
     )
     parser.add_argument(
         '--verbose',
@@ -386,9 +391,9 @@ Examples:
         list_midi_ports()
         return
 
-    # Override config
+    runtime_config = DEFAULT_CONFIG
     if args.tempo:
-        config.TEMPO = args.tempo
+        runtime_config = replace(runtime_config, tempo=args.tempo)
 
     # Initialize LLM
     print(f"\n{'='*60}")
@@ -406,6 +411,7 @@ Examples:
 
         llm = LLMInterface(
             model=args.model,
+            runtime_config=runtime_config,
             backend=args.llm_backend,
             **llm_kwargs
         )
@@ -444,6 +450,7 @@ Examples:
     generator = RealtimeJazzGenerator(
         llm=llm,
         audio_backend=backend,
+        runtime_config=runtime_config,
         save_output=args.save_output,
         output_dir=args.output_dir,
         verbose=args.verbose

@@ -1,7 +1,4 @@
-"""
-Generation pipeline for real-time jazz quartet
-Handles batched LLM generation for all four instruments at once
-"""
+"""Generation pipeline for real-time jazz quartet."""
 
 from typing import Dict, Optional
 import re
@@ -9,7 +6,7 @@ import re
 from llm_interface import LLMInterface
 from prompts import get_batched_quartet_prompt
 from tracker_parser import parse_tracker, InstrumentTrack
-import config
+from config import RuntimeConfig
 
 
 class GenerationPipeline:
@@ -17,17 +14,19 @@ class GenerationPipeline:
 
     GENERATION_ORDER = ['BASS', 'DRUMS', 'PIANO', 'SAX']
 
-    def __init__(self, llm: LLMInterface, verbose: bool = False):
+    def __init__(self, llm: LLMInterface, runtime_config: RuntimeConfig, verbose: bool = False):
         """
         Initialize generation pipeline
 
         Args:
             llm: LLMInterface instance
+            runtime_config: Immutable runtime configuration.
             verbose: Print generation details
         """
         self.llm = llm
         self.history = []  # Track previous sections for continuity
         self.verbose = verbose
+        self.config = runtime_config
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -73,7 +72,7 @@ class GenerationPipeline:
             print("[BATCHED GENERATION]")
 
         # Build batched prompt
-        prompt = get_batched_quartet_prompt(previous_context)
+        prompt = get_batched_quartet_prompt(self.config, previous_context)
 
         # Generate with higher token limit (need to fit all 4 instruments)
         # Reasoning models need MUCH more tokens (they use tokens for internal reasoning)
@@ -119,7 +118,7 @@ class GenerationPipeline:
             if not matches:
                 if self.verbose:
                     print(f"  Warning: Could not find {instrument} section in output")
-                generated_text[instrument] = '.' * config.get_total_steps()
+                generated_text[instrument] = '.' * self.config.total_steps
                 continue
 
             # Get content between this instrument and the next
@@ -191,7 +190,7 @@ class GenerationPipeline:
             Validated and possibly corrected output
         """
         lines = text.split('\n')
-        expected_steps = config.get_total_steps()
+        expected_steps = self.config.total_steps
 
         # Check line count
         if len(lines) < expected_steps:
@@ -290,18 +289,26 @@ class ContinuousGenerator:
     Generates ahead while current section plays
     """
 
-    def __init__(self, llm: LLMInterface, buffer_size: int = 4, verbose: bool = False):
+    def __init__(
+        self,
+        llm: LLMInterface,
+        runtime_config: RuntimeConfig,
+        buffer_size: int = 4,
+        verbose: bool = False
+    ):
         """
         Initialize continuous generator
 
         Args:
             llm: LLMInterface instance
+            runtime_config: Immutable runtime configuration.
             buffer_size: Number of sections to buffer ahead
             verbose: Print generation details
         """
         import threading
 
-        self.pipeline = GenerationPipeline(llm, verbose=verbose)
+        self.config = runtime_config
+        self.pipeline = GenerationPipeline(llm, runtime_config, verbose=verbose)
         self.buffer_size = buffer_size
         self.buffer = []
         self.generation_lock = threading.Lock()

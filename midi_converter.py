@@ -1,25 +1,25 @@
-"""
-MIDI converter: Converts tracker format to MIDI
-Uses fixed 16th-note resolution with optional swing feel
-"""
+"""Convert tracker format to MIDI artifacts with swing support."""
 
 import mido
-from typing import Dict, List
-from tracker_parser import InstrumentTrack, TrackerStep
-import config
+from typing import Dict, List, Optional
+
+from config import RuntimeConfig
+from tracker_parser import InstrumentTrack
 
 
 class MIDIConverter:
     """Converts parsed tracker data to MIDI file or messages"""
 
-    def __init__(self, tempo: int = None):
+    def __init__(self, runtime_config: RuntimeConfig, tempo: Optional[int] = None):
         """
         Initialize MIDI converter
         Args:
-            tempo: BPM (defaults to config.TEMPO)
+            runtime_config: Immutable runtime configuration.
+            tempo: BPM override (defaults to runtime_config.tempo)
         """
-        self.tempo = tempo or config.TEMPO
-        self.ticks_per_step = config.get_ticks_per_step()
+        self.config = runtime_config
+        self.tempo = tempo or runtime_config.tempo
+        self.ticks_per_step = runtime_config.ticks_per_step
 
     def _calculate_swing_time(self, step_idx: int) -> int:
         """
@@ -36,7 +36,7 @@ class MIDIConverter:
         Returns:
             Time in MIDI ticks
         """
-        if not config.SWING_ENABLED:
+        if not self.config.swing_enabled:
             # No swing, or not 16th notes - use straight timing
             return step_idx * self.ticks_per_step
 
@@ -50,7 +50,7 @@ class MIDIConverter:
 
         if is_offbeat:
             # Off-beat: delayed by swing ratio
-            swing_delay = int(eighth_note_ticks * config.SWING_RATIO)
+            swing_delay = int(eighth_note_ticks * self.config.swing_ratio)
             return base_time + swing_delay
         else:
             # On-beat: normal timing
@@ -64,7 +64,7 @@ class MIDIConverter:
         Returns:
             mido.MidiFile object
         """
-        mid = mido.MidiFile(ticks_per_beat=config.TICKS_PER_BEAT)
+        mid = mido.MidiFile(ticks_per_beat=self.config.ticks_per_beat)
 
         # Add tempo track
         tempo_track = mido.MidiTrack()
@@ -88,7 +88,7 @@ class MIDIConverter:
             mido.MidiTrack
         """
         track = mido.MidiTrack()
-        channel = config.CHANNELS.get(instrument_name, 0)
+        channel = self.config.channels.get(instrument_name, 0)
 
         # Add track name
         track.append(mido.MetaMessage('track_name', name=instrument_name))
@@ -107,7 +107,7 @@ class MIDIConverter:
         for step_idx, step in enumerate(track_data.steps):
             step_start_time = self._calculate_swing_time(step_idx)
 
-            if config.NOTE_MODE == 'trigger':
+            if self.config.note_mode == 'trigger':
                 # Trigger mode with tie support: notes hold across ties (^)
 
                 if step.is_tie:
@@ -167,7 +167,7 @@ class MIDIConverter:
                         active_notes.clear()
                         current_time = step_start_time
 
-            elif config.NOTE_MODE == 'sustain':
+            elif self.config.note_mode == 'sustain':
                 # Sustain mode: notes hold until next event
                 time_offset = max(0, step_start_time - current_time)
                 first_delta = True
@@ -227,7 +227,7 @@ class MIDIConverter:
         Returns:
             Time in seconds
         """
-        if not config.SWING_ENABLED:
+        if not self.config.swing_enabled:
             # No swing, or not 16th notes - use straight timing
             return step_idx * time_per_step
 
@@ -241,7 +241,7 @@ class MIDIConverter:
 
         if is_offbeat:
             # Off-beat: delayed by swing ratio
-            swing_delay = eighth_note_duration * config.SWING_RATIO
+            swing_delay = eighth_note_duration * self.config.swing_ratio
             return base_time + swing_delay
         else:
             # On-beat: normal timing
@@ -285,7 +285,7 @@ class MIDIConverter:
 
         # Generate messages for each instrument
         for instrument_name, track_data in tracks.items():
-            channel = config.CHANNELS.get(instrument_name, 0)
+            channel = self.config.channels.get(instrument_name, 0)
 
             # Set program change at t=0
             if instrument_name != 'DRUMS':
@@ -312,7 +312,7 @@ class MIDIConverter:
                     # New note(s): turn off any active notes first, then start new ones
 
                     # Turn off active notes
-                    if active_notes and config.NOTE_MODE == 'trigger':
+                    if active_notes and self.config.note_mode == 'trigger':
                         for note_pitch in list(active_notes.keys()):
                             messages.append((
                                 step_time,
@@ -330,7 +330,7 @@ class MIDIConverter:
 
                 else:
                     # Rest: turn off any active notes
-                    if active_notes and config.NOTE_MODE == 'trigger':
+                    if active_notes and self.config.note_mode == 'trigger':
                         for note_pitch in list(active_notes.keys()):
                             messages.append((
                                 step_time,
@@ -339,7 +339,7 @@ class MIDIConverter:
                         active_notes.clear()
 
             # Turn off any remaining active notes at the end
-            if active_notes and config.NOTE_MODE == 'trigger':
+            if active_notes and self.config.note_mode == 'trigger':
                 final_step = start_step + len(steps_to_process)
                 final_time = self._calculate_swing_time_seconds(final_step, time_per_step)
                 for note_pitch in active_notes.keys():
@@ -353,14 +353,19 @@ class MIDIConverter:
         return messages
 
 
-def tracker_to_midi_file(tracks: Dict[str, InstrumentTrack], tempo: int = None) -> mido.MidiFile:
+def tracker_to_midi_file(
+    tracks: Dict[str, InstrumentTrack],
+    runtime_config: RuntimeConfig,
+    tempo: Optional[int] = None
+) -> mido.MidiFile:
     """
     Convenience function: Convert tracker data to MIDI file
     Args:
         tracks: Dict mapping instrument name to InstrumentTrack
-        tempo: BPM (defaults to config.TEMPO)
+        runtime_config: Immutable runtime configuration.
+        tempo: BPM override (defaults to runtime_config.tempo)
     Returns:
         mido.MidiFile
     """
-    converter = MIDIConverter(tempo=tempo)
+    converter = MIDIConverter(runtime_config, tempo=tempo)
     return converter.create_midi_file(tracks)

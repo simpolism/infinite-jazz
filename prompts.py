@@ -1,22 +1,21 @@
-"""
-Prompt builders for Infinite Jazz batched quartet generation.
-"""
+"""Prompt builders for Infinite Jazz batched quartet generation."""
 
-import config
+from config import RuntimeConfig
 
 
-def get_batched_quartet_prompt(previous_context: str = "") -> str:
+def get_batched_quartet_prompt(runtime_config: RuntimeConfig, previous_context: str = "") -> str:
     """
     Build the system prompt for generating all instruments in one pass.
 
     Args:
+        runtime_config: Immutable runtime configuration.
         previous_context: Optional tracker text from the prior section.
 
     Returns:
         Formatted prompt string for batched generation.
     """
-    steps = config.get_total_steps()
-    bars = config.BARS_PER_GENERATION
+    steps = runtime_config.total_steps
+    bars = runtime_config.bars_per_generation
 
     prompt = f"""You are a jazz quartet generating {bars} bars of music. Output all 4 instruments in tracker format.
 
@@ -205,6 +204,9 @@ SAX
 
 """
 
-    prompt += f"Generate the new section now. Output ONLY tracker lines exactly as specified above with {steps} lines per instrument:"
+    prompt += (
+        "Generate the new section now. Output ONLY tracker lines exactly as specified "
+        f"above with {steps} lines per instrument:"
+    )
 
     return prompt

@@ -1,10 +1,9 @@
-"""
-LLM interface for music generation.
-Supports Ollama for local inference and OpenAI-compatible APIs (e.g., Groq).
-"""
+"""LLM interface for music generation."""
 
 from typing import Optional, Dict, Any
 import time
+
+from config import RuntimeConfig
 
 
 class OllamaBackend:
@@ -102,6 +101,7 @@ class OpenAIBackend:
     def __init__(
         self,
         model_name: str,
+        runtime_config: RuntimeConfig,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         **kwargs
@@ -123,6 +123,7 @@ class OpenAIBackend:
             )
 
         self.model_name = model_name
+        self.runtime_config = runtime_config
 
         # Initialize client with custom base_url if provided
         client_kwargs = {}
@@ -230,13 +231,13 @@ class OpenAIBackend:
                 user_msg = marker.strip() + (parts[1] if len(parts) > 1 else "")
 
                 # Add explicit start trigger to user message
+                steps = self.runtime_config.total_steps
                 if "Generate YOUR version now" in marker:
-                    import config
-                    steps = config.get_total_steps()
-                    user_msg += f"\n\nStart your output with 'BASS' on the first line, then provide exactly {steps} numbered lines per instrument:"
+                    user_msg += (
+                        "\n\nStart your output with 'BASS' on the first line, then provide exactly "
+                        f"{steps} numbered lines per instrument:"
+                    )
                 elif "Output only the notes" in marker:
-                    import config
-                    steps = config.get_total_steps()
                     user_msg += f"\n\nBegin outputting {steps} numbered lines now:"
 
                 return system_msg, user_msg
@@ -266,6 +267,7 @@ class LLMInterface:
     def __init__(
         self,
         model: str,
+        runtime_config: RuntimeConfig,
         backend: str = "auto",
         **kwargs
     ):
@@ -276,12 +278,14 @@ class LLMInterface:
             model: Model identifier
                    For Ollama: model name (e.g., "qwen2.5:3b", "phi3:mini")
                    For OpenAI-compatible APIs: model name (e.g., "gpt-4.1-mini", "llama-3.1-70b-versatile")
+            runtime_config: Immutable runtime configuration shared across the app.
             backend: "auto", "ollama", or "openai"
             **kwargs: Backend-specific options
                       For OpenAI: api_key, base_url
         """
         self.backend_name = backend
         self.backend = None
+        self.runtime_config = runtime_config
 
         # Auto-detect backend
         if backend == "auto":
@@ -295,7 +299,7 @@ class LLMInterface:
 
         elif backend == "openai":
             print(f"Using OpenAI-compatible API backend")
-            self.backend = OpenAIBackend(model_name=model, **kwargs)
+            self.backend = OpenAIBackend(model_name=model, runtime_config=runtime_config, **kwargs)
             self.backend_name = "openai"
 
         else:

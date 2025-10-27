@@ -89,7 +89,7 @@ E4:78
 ```
 
 - Four instrument headers (`BASS`, `DRUMS`, `PIANO`, `SAX`)
-- 16th-note resolution, `config.get_total_steps()` lines per instrument
+- 16th-note resolution, `RuntimeConfig.total_steps` lines per instrument (32 by default)
 - Notes: `NOTE:VELOCITY` (e.g., `C4:80`)
 - Chords: comma separated (piano voicings)
 - Rests: `.`
@@ -101,14 +101,15 @@ E4:78
 ## Configuration Highlights (`config.py`)
 
 ```python
-TEMPO = 120              # BPM (override with --tempo)
-NOTE_MODE = 'trigger'    # or 'sustain'
-BARS_PER_GENERATION = 2
-SWING_ENABLED = True
-SWING_RATIO = 0.67       # 2:1 swing feel
+from dataclasses import replace
+from config import DEFAULT_CONFIG
+
+cfg = DEFAULT_CONFIG                 # Immutable defaults
+cfg = replace(cfg, tempo=140)        # Override BPM
+cfg.total_steps                      # Derived 16th-note steps per section
 ```
 
-Other constants define MIDI channel routing, allowable pitch ranges per instrument, and tick resolution. Update the module and restart the process to apply changes.
+`RuntimeConfig` also exposes channel and pitch-range maps plus swing parameters. Thread a config instance through constructors instead of mutating globals.
 
 ---
 
