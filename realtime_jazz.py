@@ -1,294 +1,18 @@
 #!/usr/bin/env python3
-"""
-Real-time jazz quartet generator
-Generates and plays jazz continuously using local LLM
-"""
+"""CLI entrypoint for the Infinite Jazz realtime generator."""
 
 import argparse
 import sys
-import time
-import threading
-from datetime import datetime
-from pathlib import Path
-from queue import Queue, Empty
+from dataclasses import replace
 from typing import Optional
 
-from dataclasses import replace
-
-from llm_interface import LLMInterface, list_ollama_models
-from generator import ContinuousGenerator, save_generated_section, concatenate_sections
-from midi_converter import MIDIConverter
-from audio_output import (
-    FluidSynthBackend,
-    HardwareMIDIBackend,
-    VirtualMIDIBackend,
-    list_midi_ports
-)
-from config import RuntimeConfig, DEFAULT_CONFIG
+from audio_output import list_midi_ports
+from app import InfiniteJazzApp, LLMOptions, AudioOptions, RunOptions
+from config import DEFAULT_CONFIG
+from llm_interface import list_ollama_models
 
 
-class RealtimeJazzGenerator:
-    """
-    Main application for real-time jazz generation
-    Coordinates LLM generation, MIDI conversion, and playback
-    """
-
-    def __init__(
-        self,
-        llm: LLMInterface,
-        audio_backend,
-        runtime_config: RuntimeConfig,
-        save_output: bool = False,
-        output_dir: str = "output",
-        verbose: bool = False
-    ):
-        """
-        Initialize real-time jazz generator
-
-        Args:
-            llm: LLMInterface instance
-            audio_backend: AudioBackend instance
-            runtime_config: Immutable runtime configuration.
-            save_output: Save generated sections to files
-            output_dir: Directory for saved output
-            verbose: Print generation details
-        """
-        self.llm = llm
-        self.audio_backend = audio_backend
-        self.config = runtime_config
-        self.save_output = save_output
-        self.output_dir = Path(output_dir)
-        self.verbose = verbose
-
-        self.run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-
-        if self.save_output:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Saving outputs to {self.output_dir}")
-
-        self.generator = ContinuousGenerator(llm, runtime_config, verbose=verbose)
-        self.midi_converter = MIDIConverter(runtime_config)
-
-        self.section_count = 0
-        self.is_running = False
-        self.all_sections = []  # Accumulate all sections for final MIDI export
-
-        # FIFO queue for MIDI messages
-        self.midi_queue = Queue()
-        self.playback_thread = None
-
-    def _playback_worker(self):
-        """
-        Playback worker thread - continuously pulls MIDI messages from queue and plays them
-        """
-        import mido
-
-        start_time = time.time()
-        msg_count = 0
-
-        while self.is_running:
-            try:
-                # Get next message from queue (blocking with timeout)
-                item = self.midi_queue.get(timeout=0.1)
-
-                # Check for sentinel (end signal)
-                if item is None:
-                    print(f"Playback finished ({msg_count} messages played)")
-                    break
-
-                scheduled_time, message = item
-
-                # Wait until scheduled time
-                current_time = time.time() - start_time
-                wait_time = scheduled_time - current_time
-
-                if wait_time > 0:
-                    time.sleep(wait_time)
-
-                # Send message
-                self.audio_backend.send_message(message)
-                msg_count += 1
-
-            except Empty:
-                # No messages in queue, continue waiting
-                continue
-
-    def _add_section_to_queue(self, tracks, start_time):
-        """
-        Convert section to MIDI messages and add to playback queue
-
-        Args:
-            tracks: Dict of instrument tracks
-            start_time: Absolute start time for this section (in seconds)
-
-        Returns:
-            Tuple containing actual duration (seconds) and message count
-        """
-        # Use the faster create_realtime_messages method instead of creating a full MIDI file
-        messages = self.midi_converter.create_realtime_messages(tracks)
-
-        # Add messages to queue with adjusted timing
-        for relative_time, message in messages:
-            self.midi_queue.put((start_time + relative_time, message))
-
-        # Calculate actual duration based on number of steps, not last message
-        # (last message might not represent true duration if last step is a rest)
-        num_steps = len(next(iter(tracks.values())).steps) if tracks else 0
-        actual_duration = self._calculate_section_duration_from_steps(num_steps)
-
-        return actual_duration, len(messages)
-
-    def _calculate_section_duration_from_steps(self, num_steps: int) -> float:
-        """Calculate duration in seconds for a given number of steps"""
-        beats_per_second = self.config.tempo / 60.0
-        steps_per_beat = 4  # Fixed 16th-note grid
-
-        time_per_step = 1.0 / (beats_per_second * steps_per_beat)
-        return num_steps * time_per_step
-
-    def run(self, num_sections: Optional[int] = None):
-        """
-        Run the real-time jazz generator
-
-        Args:
-            num_sections: Number of sections to generate (None = infinite)
-        """
-        print(f"\n{'='*60}")
-        print(f"Infinite Jazz - Real-time Quartet Generator")
-        print(f"{'='*60}")
-        print(f"Tempo: {self.config.tempo} BPM")
-        print("Resolution: 16th notes")
-        print(f"Bars per section: {self.config.bars_per_generation}")
-        print(f"{'='*60}\n")
-
-        if num_sections is not None and num_sections <= 0:
-            print("No sections requested; exiting.")
-            return
-
-        try:
-            # Pre-fill buffer
-            print("Pre-generating initial sections...\n")
-            buffer_size = self.generator.buffer_size
-            if num_sections is None:
-                initial_prefill = buffer_size
-            else:
-                initial_prefill = min(buffer_size, num_sections)
-
-            prefilled = self.generator.prefill_buffer(count=initial_prefill) or 0
-
-            print(f"\n{'='*60}")
-            print("Starting playback... (Press Ctrl+C to stop)")
-            print(f"{'='*60}\n")
-
-            self.is_running = True
-            section_num = 0
-            queued_time = 0.0  # How much music time we've queued
-            playback_start_time = None  # Wall-clock time when playback started
-
-            # Give FluidSynth a moment to be ready
-            time.sleep(0.5)
-
-            # Start playback thread
-            self.playback_thread = threading.Thread(target=self._playback_worker)
-            self.playback_thread.daemon = True
-            self.playback_thread.start()
-            playback_start_time = time.time()
-
-            # Continue generating and queueing sections while playing
-            while self.is_running:
-                # Check if we've reached the limit
-                if num_sections is not None and section_num >= num_sections:
-                    break
-
-                # Calculate how far ahead we are (in seconds)
-                wall_clock_elapsed = time.time() - playback_start_time
-                ahead_by = queued_time - wall_clock_elapsed
-
-                # Maintain buffer: only queue more if we're less than buffer_size sections ahead
-                max_ahead = self.generator.buffer_size * self._calculate_section_duration_from_steps(
-                    self.config.total_steps
-                )
-
-                if ahead_by >= max_ahead:
-                    if self.verbose:
-                        print(f"Queued {ahead_by:.1f}s ahead (max {max_ahead:.1f}s), waiting...")
-                    time.sleep(0.5)
-                    continue
-
-                # Wait if buffer is empty (let background generation catch up)
-                while len(self.generator.buffer) == 0:
-                    if self.verbose:
-                        print(f"Buffer empty, waiting for generation...")
-                    time.sleep(0.1)  # Check every 100ms
-
-                # Get next section from buffer
-                print(f"\n--- Section {section_num + 1} ---")
-                should_continue = (
-                    num_sections is None or (section_num + 1) < num_sections
-                )
-                tracks = self.generator.get_next_section(continue_buffering=should_continue)
-
-                # Track section for final export
-                self.all_sections.append(tracks)
-
-                # Add MIDI messages to queue and get actual duration
-                print(f"Queueing section {section_num + 1} for playback...")
-                actual_duration, msg_count = self._add_section_to_queue(tracks, queued_time)
-                if self.verbose:
-                    print(f"  Added {msg_count} MIDI messages (duration {actual_duration:.2f}s)")
-                else:
-                    print(f"  Section duration {actual_duration:.2f}s")
-
-                # Advance time for next section (use actual MIDI duration)
-                queued_time += actual_duration
-                section_num += 1
-
-            # Signal end of playback
-            print("\nFinishing playback...")
-            self.midi_queue.put(None)  # Sentinel
-
-            # Wait for playback to finish
-            if self.playback_thread:
-                self.playback_thread.join(timeout=10.0)
-
-        except KeyboardInterrupt:
-            print("\n\nStopping...")
-        finally:
-            self.cleanup()
-
-    def cleanup(self):
-        """Clean up resources"""
-        self.is_running = False
-
-        # Stop playback thread
-        if self.playback_thread and self.playback_thread.is_alive():
-            self.midi_queue.put(None)  # Send sentinel
-            self.playback_thread.join(timeout=2.0)
-
-        self.audio_backend.close()
-
-        # Save complete MIDI file if we have sections
-        if self.save_output and self.all_sections:
-            print(f"\nSaving complete MIDI file ({len(self.all_sections)} sections)...")
-
-            # Concatenate all sections
-            combined_tracks = concatenate_sections(self.all_sections)
-
-            # Convert to MIDI
-            midi_file = self.midi_converter.create_midi_file(combined_tracks)
-
-            # Save with timestamped filenames
-            midi_file_path = self.output_dir / f"complete_{self.run_timestamp}.mid"
-            midi_file.save(str(midi_file_path))
-            print(f"✓ Saved complete MIDI: {midi_file_path}")
-
-            txt_file_path = self.output_dir / f"complete_{self.run_timestamp}.txt"
-            save_generated_section(combined_tracks, str(txt_file_path))
-
-        print("Done!")
-
-
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description='Real-time jazz quartet generator using local LLM',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -297,28 +21,23 @@ Examples:
   # Use Ollama (easiest - auto-downloads model)
   python realtime_jazz.py -m qwen2.5:3b
 
-  # Use Groq for fast inference
-  python realtime_jazz.py --llm-backend openai -m llama-3.1-70b-versatile \\
-    --base-url https://api.groq.com/openai/v1 --api-key YOUR_GROQ_API_KEY
+  # Quick sanity run (Groq defaults)
+  .venv/bin/python realtime_jazz.py --llm-backend openai -n 2
 
-  # Use OpenAI
-  python realtime_jazz.py --llm-backend openai -m gpt-3.5-turbo
-
-  # Generate only 4 sections to test
-  python realtime_jazz.py -m qwen2.5:3b -n 4
+  # Generate only 4 sections with Ollama
+  .venv/bin/python realtime_jazz.py -m qwen2.5:3b -n 4
 
   # Use hardware MIDI output
-  python realtime_jazz.py -m qwen2.5:3b --backend hardware --port "Your MIDI Port"
+  .venv/bin/python realtime_jazz.py --backend hardware --port "Your MIDI Port"
 
   # Save generated sections to files
-  python realtime_jazz.py -m qwen2.5:3b --save-output
+  .venv/bin/python realtime_jazz.py --save-output
         """
     )
 
     parser.add_argument(
         '-m', '--model',
-        default='qwen2.5:3b',
-        help='Model identifier: Ollama model name (e.g., qwen2.5:3b) or OpenAI-compatible model name (e.g., gpt-4.1-mini, llama-3.1-70b-versatile) (default: qwen2.5:3b)'
+        help='Model identifier: Ollama (e.g., qwen2.5:3b) or OpenAI-compatible (e.g., openai/gpt-oss-120b)'
     )
     parser.add_argument(
         '--llm-backend',
@@ -332,7 +51,7 @@ Examples:
     )
     parser.add_argument(
         '--base-url',
-        help='Base URL for OpenAI-compatible API (e.g., https://api.groq.com/openai/v1)'
+        help='Base URL for OpenAI-compatible API (default: https://api.groq.com/openai/v1 when backend=openai)'
     )
     parser.add_argument(
         '--list-models',
@@ -379,7 +98,18 @@ Examples:
         action='store_true',
         help='Enable verbose logging for debugging'
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        '--context-steps',
+        type=int,
+        default=4,
+        help='Number of tracker steps per instrument to include from the previous section (default: 4)'
+    )
+    return parser
+
+
+def main(argv: Optional[list[str]] = None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     # List models and exit
     if args.list_models:
@@ -391,72 +121,37 @@ Examples:
         list_midi_ports()
         return
 
-    runtime_config = DEFAULT_CONFIG
-    if args.tempo:
-        runtime_config = replace(runtime_config, tempo=args.tempo)
+    runtime_config = DEFAULT_CONFIG if args.tempo is None else replace(DEFAULT_CONFIG, tempo=args.tempo)
 
-    # Initialize LLM
-    print(f"\n{'='*60}")
-    print("Initializing LLM...")
-    print(f"{'='*60}\n")
-
-    try:
-        # Prepare kwargs based on backend
-        llm_kwargs = {}
-        if args.llm_backend == 'openai':
-            if args.api_key:
-                llm_kwargs['api_key'] = args.api_key
-            if args.base_url:
-                llm_kwargs['base_url'] = args.base_url
-
-        llm = LLMInterface(
-            model=args.model,
-            runtime_config=runtime_config,
-            backend=args.llm_backend,
-            **llm_kwargs
-        )
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        print("\nTroubleshooting:")
-        print("  - For Ollama: Make sure Ollama is installed and running")
-        print("    Install: curl -fsSL https://ollama.com/install.sh | sh")
-        print("    Start: ollama serve")
-        print("  - For OpenAI/Groq: Make sure API key is set and base-url is correct")
-        print("    Set OPENAI_API_KEY env var or use --api-key")
-        print("  - Use --list-models to see available Ollama models")
-        sys.exit(1)
-
-    # Initialize audio backend
-    print(f"\n{'='*60}")
-    print("Initializing audio backend...")
-    print(f"{'='*60}\n")
-
-    try:
-        if args.backend == 'fluidsynth':
-            backend = FluidSynthBackend()
-        elif args.backend == 'hardware':
-            backend = HardwareMIDIBackend(port_name=args.port)
-        elif args.backend == 'virtual':
-            backend = VirtualMIDIBackend()
-    except Exception as e:
-        print(f"Error initializing audio backend: {e}")
-        print("\nTry one of these options:")
-        print("  1. Install FluidSynth (for software synthesis)")
-        print("  2. Use --list-ports to see available MIDI ports")
-        print("  3. Use --backend virtual to create a virtual MIDI port")
-        sys.exit(1)
-
-    # Run generator
-    generator = RealtimeJazzGenerator(
-        llm=llm,
-        audio_backend=backend,
-        runtime_config=runtime_config,
+    llm_options = LLMOptions(
+        backend=args.llm_backend,
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+    )
+    audio_options = AudioOptions(
+        backend=args.backend,
+        port=args.port,
+    )
+    run_options = RunOptions(
+        num_sections=args.num_sections,
         save_output=args.save_output,
         output_dir=args.output_dir,
-        verbose=args.verbose
+        verbose=args.verbose,
+        context_steps=max(0, args.context_steps),
     )
 
-    generator.run(num_sections=args.num_sections)
+    app = InfiniteJazzApp(
+        runtime_config=runtime_config,
+        llm_options=llm_options,
+        audio_options=audio_options,
+        run_options=run_options,
+    )
+
+    try:
+        app.run()
+    except Exception:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

@@ -4,7 +4,7 @@ from typing import Dict, Optional
 import re
 
 from llm_interface import LLMInterface
-from prompts import get_batched_quartet_prompt
+from prompts import PromptBuilder
 from tracker_parser import parse_tracker, InstrumentTrack
 from config import RuntimeConfig
 
@@ -14,7 +14,13 @@ class GenerationPipeline:
 
     GENERATION_ORDER = ['BASS', 'DRUMS', 'PIANO', 'SAX']
 
-    def __init__(self, llm: LLMInterface, runtime_config: RuntimeConfig, verbose: bool = False):
+    def __init__(
+        self,
+        llm: LLMInterface,
+        runtime_config: RuntimeConfig,
+        verbose: bool = False,
+        context_steps: int = 4
+    ):
         """
         Initialize generation pipeline
 
@@ -22,11 +28,14 @@ class GenerationPipeline:
             llm: LLMInterface instance
             runtime_config: Immutable runtime configuration.
             verbose: Print generation details
+            context_steps: Number of tracker steps per instrument to feed as context.
         """
         self.llm = llm
         self.history = []  # Track previous sections for continuity
         self.verbose = verbose
         self.config = runtime_config
+        self.prompt_builder = PromptBuilder(runtime_config)
+        self.context_steps = max(0, context_steps)
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -72,18 +81,25 @@ class GenerationPipeline:
             print("[BATCHED GENERATION]")
 
         # Build batched prompt
-        prompt = get_batched_quartet_prompt(self.config, previous_context)
+        prompt = self.prompt_builder.build_quartet_prompt(previous_context)
 
         # Generate with higher token limit (need to fit all 4 instruments)
         # Reasoning models need MUCH more tokens (they use tokens for internal reasoning)
         gen_config = {
-            'max_tokens': 3000,  # High for reasoning models like gpt-oss-20b
-            'temperature': 0.8,
-            'top_p': 0.92,
-            'repeat_penalty': 1.1,
+            'max_tokens': 3200,  # Leave headroom for richer phrasing
+            'temperature': 0.92,
+            'top_p': 0.97,
+            'repeat_penalty': 1.05,
         }
 
-        raw_output = self.llm.generate(prompt, **gen_config)
+        result = self.llm.generate(prompt, **gen_config)
+        raw_output = result.text
+
+        if self.verbose:
+            print(
+                f"\nLLM stats: backend={result.backend}, tokens={result.tokens}, "
+                f"latency={result.latency:.2f}s, finish_reason={result.finish_reason}"
+            )
 
         if self.verbose:
             print(f"\nRaw output length: {len(raw_output)} chars")
@@ -269,15 +285,16 @@ class GenerationPipeline:
         prev = self.history[-1]
         truncated = {}
 
+        steps_to_keep = self.context_steps if self.context_steps > 0 else 0
+
         for instrument in self.GENERATION_ORDER:
             if instrument in prev:
                 lines = prev[instrument].split('\n')
-                # Get last 4 lines only
-                truncated[instrument] = '\n'.join(lines[-4:])
+                truncated[instrument] = '\n'.join(lines[-steps_to_keep:]) if steps_to_keep else ""
 
         sections = []
         for instrument in self.GENERATION_ORDER:
-            if instrument in truncated:
+            if instrument in truncated and truncated[instrument]:
                 sections.append(f"{instrument} (ending):\n...{truncated[instrument]}")
 
         return '\n\n'.join(sections)
@@ -294,7 +311,8 @@ class ContinuousGenerator:
         llm: LLMInterface,
         runtime_config: RuntimeConfig,
         buffer_size: int = 4,
-        verbose: bool = False
+        verbose: bool = False,
+        context_steps: int = 4
     ):
         """
         Initialize continuous generator
@@ -308,7 +326,12 @@ class ContinuousGenerator:
         import threading
 
         self.config = runtime_config
-        self.pipeline = GenerationPipeline(llm, runtime_config, verbose=verbose)
+        self.pipeline = GenerationPipeline(
+            llm,
+            runtime_config,
+            verbose=verbose,
+            context_steps=context_steps
+        )
         self.buffer_size = buffer_size
         self.buffer = []
         self.generation_lock = threading.Lock()

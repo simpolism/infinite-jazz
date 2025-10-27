@@ -29,18 +29,17 @@ brew install fluid-synth
 **Groq (recommended)**
 ```bash
 export GROQ_API_KEY="your_api_key"
-python realtime_jazz.py \
+.venv/bin/python realtime_jazz.py \
   --llm-backend openai \
-  --model llama-3.1-70b-versatile \
-  --base-url https://api.groq.com/openai/v1 \
   -n 4
 ```
+When no model or base URL is supplied, the CLI targets Groq's `openai/gpt-oss-120b` via `https://api.groq.com/openai/v1`.
 
 **Ollama (local)**
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh   # one-time install
 ollama serve                                   # separate terminal
-python realtime_jazz.py -m qwen2.5:3b -n 4
+.venv/bin/python realtime_jazz.py -m qwen2.5:3b -n 4
 ```
 
 ### 3. Useful flags
@@ -56,11 +55,12 @@ Stop playback with `Ctrl+C`; the app drains the buffer and exits cleanly.
 
 ## Architecture Overview
 
-1. **Prompting** – `prompts.py` builds a single quartet prompt describing formatting and stylistic guidance.
+1. **Prompting** – `prompts.PromptBuilder` emits quartet prompts tailored by runtime config and style.
 2. **Generation** – `generator.GenerationPipeline` calls the LLM, parses the response into structured tracks, and keeps a short history for continuity.
 3. **Buffering** – `generator.ContinuousGenerator` maintains a queue of upcoming sections so playback never waits on inference.
 4. **Conversion** – `midi_converter.MIDIConverter` converts tracker steps to MIDI events on a fixed 16th-note grid with optional swing.
-5. **Playback** – `RealtimeJazzGenerator` schedules events and streams them through audio backends (FluidSynth, hardware MIDI, or a virtual port).
+5. **Playback** – `runtime.RealtimeJazzGenerator` schedules events and streams them through audio backends (FluidSynth, hardware MIDI, or a virtual port).
+6. **Application layer** – `app.InfiniteJazzApp` wires the runtime config, LLM interface, and audio backend; `realtime_jazz.py` is now a thin CLI wrapper.
 
 The whole loop runs continuously: while one section plays, the system composes the next ones in the background.
 
@@ -113,24 +113,34 @@ cfg.total_steps                      # Derived 16th-note steps per section
 
 ---
 
+## Tuning Creativity
+
+- Prompt styles rotate each cycle (`modern swing`, `modal post-bop`, `uptempo bebop`, `late-night ballad`). Edit `PromptBuilder.style_palette` in `prompts.py` to curate or fix a vibe.
+- Generation temperature/top-p defaults are set to 0.92 / 0.97. Drop them in `generator.GenerationPipeline._generate_batched` for tighter adherence, raise them for wilder phrases.
+- Inject custom instructions by subclassing `PromptBuilder` or swapping it in `GenerationPipeline` (e.g., derivative of `PromptBuilder` that emphasises polyrhythms or Latin grooves).
+- Still want more surprise? Feed a short corpus of tracker snippets into `previous_context` to prime different harmonic territory before realtime playback.
+- Control how much history the model references with `--context-steps` (default 4). Higher values increase continuity; lower values encourage fresh jumps.
+
+---
+
 ## Command Reference
 
 ```bash
-# Use Groq with a different model
-python realtime_jazz.py --llm-backend openai \
+# Use Groq with a different model/base URL
+.venv/bin/python realtime_jazz.py --llm-backend openai \
   --model gemma-9b-it \
   --base-url https://api.groq.com/openai/v1 \
   --api-key $GROQ_API_KEY
 
 # Save every generated section plus a stitched MIDI file
-python realtime_jazz.py --save-output --output-dir recordings/
+.venv/bin/python realtime_jazz.py --save-output --output-dir recordings/
 
 # Drive a DAW via a virtual MIDI port
-python realtime_jazz.py --backend virtual
+.venv/bin/python realtime_jazz.py --backend virtual
 
 # Send MIDI to hardware (after checking ports)
-python realtime_jazz.py --list-ports
-python realtime_jazz.py --backend hardware --port "Yamaha TG-33"
+.venv/bin/python realtime_jazz.py --list-ports
+.venv/bin/python realtime_jazz.py --backend hardware --port "Yamaha TG-33"
 ```
 
 ---

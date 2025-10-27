@@ -1,212 +1,213 @@
 """Prompt builders for Infinite Jazz batched quartet generation."""
 
+from dataclasses import dataclass, field
+from itertools import cycle
+from typing import Iterable, List
+
 from config import RuntimeConfig
 
 
-def get_batched_quartet_prompt(runtime_config: RuntimeConfig, previous_context: str = "") -> str:
-    """
-    Build the system prompt for generating all instruments in one pass.
+@dataclass
+class PromptBuilder:
+    """Build prompts for quartet generation with rotating stylistic guidance."""
 
-    Args:
-        runtime_config: Immutable runtime configuration.
-        previous_context: Optional tracker text from the prior section.
-
-    Returns:
-        Formatted prompt string for batched generation.
-    """
-    steps = runtime_config.total_steps
-    bars = runtime_config.bars_per_generation
-
-    prompt = f"""You are a jazz quartet generating {bars} bars of music. Output all 4 instruments in tracker format.
-
-FORMAT RULES:
-- {steps} numbered lines per instrument (one line = one 16th-note step)
-- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80"), NUMBER . (rest), or NUMBER ^ (hold previous note)
-- Chords: Multiple notes on same line (e.g., "1 C3:65,E3:62,G3:60")
-- Ties: Use ^ to hold previous note longer (e.g., "1 C2:80" then "2 ^" holds C2 across both steps)
-- Velocity: 0-127 (60-90 typical for jazz)
-
-INSTRUMENT ROLES:
-
-BASS - Walking bassline foundation
-- Recommended range: E1 to G2 (keep it low for bass sound)
-- Stepwise motion connecting chord tones
-- Emphasize roots on strong beats
-- Velocity: 70-85
-
-DRUMS - Swing rhythm (General MIDI drum map)
-- C2: Kick | D2: Snare | F#2: Hi-hat | D#3: Ride cymbal
-- Swing feel: Don't play every 16th note! Use rests (.)
-- Ride/hi-hat on swing 8ths (every other 16th note or less)
-- Velocity: Kick/Snare 85-95, Cymbals 50-70
-
-PIANO - Chord comping
-- Recommended range: C3 to C5 (mid-range for comping)
-- Jazz voicings (7ths, 9ths), syncopated rhythm
-- Leave space - don't play every beat
-- Velocity: 60-75
-
-SAX - Lead melody and improvisation
-- MONOPHONIC: ONE note per line (saxes can't play chords!)
-- Recommended range: A3 to F5 (typical tenor sax range)
-- Create interesting melodies with varied intervals and rhythms
-- Use space - include rests between phrases
-- Use ^ (tie) to hold longer melodic notes
-- Velocity: 70-90, accents up to 100
-
-FORMAT EXAMPLE:
-
-BASS
-1 C2:80
-2 .
-3 E2:75
-4 .
-5 G2:75
-6 .
-7 F2:70
-8 .
-9 C2:80
-10 .
-11 B1:75
-12 .
-13 A1:75
-14 .
-15 G1:70
-16 .
-17 C2:80
-18 .
-19 E2:75
-20 .
-21 G2:70
-22 .
-23 F2:75
-24 .
-25 E2:80
-26 .
-27 D2:75
-28 .
-29 C2:80
-30 .
-31 B1:75
-32 .
-
-DRUMS
-1 C2:90,D#3:60
-2 .
-3 D#3:55
-4 .
-5 D2:85,F#2:50
-6 .
-7 D#3:60
-8 .
-9 C2:85
-10 .
-11 D#3:55
-12 .
-13 D2:90,F#2:50
-14 .
-15 D#3:60
-16 C2:75
-17 C2:90,D#3:60
-18 .
-19 D#3:55
-20 .
-21 D2:85,F#2:50
-22 .
-23 D#3:60
-24 .
-25 C2:85
-26 .
-27 D#3:55
-28 .
-29 D2:90,F#2:50
-30 C2:75,F#2:45
-31 D#3:60
-32 .
-
-PIANO
-1 C3:65,E3:60,G3:62
-2 .
-3 .
-4 .
-5 E3:68,G3:65,B3:62
-6 .
-7 .
-8 C3:65,E3:62,B3:60
-9 .
-10 .
-11 .
-12 G3:65,B3:62,D4:58
-13 .
-14 .
-15 .
-16 .
-17 C3:65,E3:60,G3:62
-18 .
-19 .
-20 .
-21 F3:68,A3:65,C4:62
-22 .
-23 .
-24 D3:65,F3:62,A3:60
-25 .
-26 .
-27 .
-28 G3:65,B3:62,D4:58
-29 .
-30 .
-31 .
-32 .
-
-SAX
-1 .
-2 .
-3 E4:85
-4 ^
-5 B4:90
-6 G4:75
-7 .
-8 E4:80
-9 ^
-10 .
-11 C5:85
-12 ^
-13 A4:70
-14 .
-15 .
-16 .
-17 D5:85
-18 ^
-19 ^
-20 B4:80
-21 .
-22 G4:75
-23 D4:70
-24 ^
-25 .
-26 E4:85
-27 .
-28 C5:90
-29 ^
-30 ^
-31 A4:75
-32 .
-"""
-
-    if previous_context:
-        prompt += f"\nPREVIOUS SECTION:\n{previous_context}\n\n"
-        prompt += """CRITICAL - AVOID REPETITION:
-- DO NOT repeat the same patterns from the previous section!
-- Try NEW melodic ideas, different intervals, contrasting rhythms
-- Jazz is about VARIATION - each chorus should sound fresh
-- Mix it up: if you went up before, try going down now
-- Change your approach - surprise us!
-
-"""
-
-    prompt += (
-        "Generate the new section now. Output ONLY tracker lines exactly as specified "
-        f"above with {steps} lines per instrument:"
+    config: RuntimeConfig
+    primary_style: str = "modern swing"
+    style_palette: Iterable[str] = (
+        "modern swing",
+        "modal post-bop exploration",
+        "uptempo bebop chase",
+        "late-night ballad phrasing",
     )
+    _style_cycle: cycle = field(init=False, repr=False)
 
-    return prompt
+    def __post_init__(self):
+        palette: List[str] = list(self.style_palette) or [self.primary_style]
+        if self.primary_style not in palette:
+            palette.insert(0, self.primary_style)
+        self._style_cycle = cycle(palette)
+
+    def _active_style(self) -> str:
+        return next(self._style_cycle)
+
+    def build_quartet_prompt(self, previous_context: str = "") -> str:
+        """
+        Construct the prompt for generating all instruments in one pass.
+
+        Args:
+            previous_context: Optional tracker text from the prior section.
+
+        Returns:
+            Formatted prompt string.
+        """
+        steps = self.config.total_steps
+        bars = self.config.bars_per_generation
+        style = self._active_style()
+
+        prompt = [
+            f"You are a {style} jazz quartet generating {bars} bars of music.",
+            "Output all 4 instruments in tracker format exactly as specified.",
+            "",
+            "FORMAT RULES:",
+            f"- {steps} numbered lines per instrument (one line = one 16th-note step)",
+            '- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80"), NUMBER . (rest), or NUMBER ^ (tie)',
+            '- Chords: NUMBER NOTE:VELOCITY,NOTE:VELOCITY (e.g., "1 C3:65,E3:62,G3:60")',
+            "- Velocity range: 0-127 (60-90 typical for jazz)",
+            "",
+            "INSTRUMENT ROLES:",
+            "BASS – Walking foundation (E1–G2). Outline harmony but feel free to slip in approach tones.",
+            "DRUMS – Swing pulse using GM mapping (kick/snare/cymbals) yet break the ride pattern when inspiration hits.",
+            "PIANO – Mid-range comping (C3–C5) with open voicings; leave pockets of silence or punchy stabs at will.",
+            "SAX – Monophonic lead (A3–F5). Think in gestures rather than patterns—rests, flurries, and ties are all welcome.",
+            "SAX: Approach this chorus like a fearless improviser—chase tension, embrace wide intervals, and resolve phrases in surprising ways while keeping the tracker format clean.",
+            "",
+            "FORMAT EXAMPLE A (Walking swing):",
+            "BASS",
+            "1 C2:80",
+            "2 .",
+            "3 E2:75",
+            "4 .",
+            "5 G2:78",
+            "6 .",
+            "7 F2:74",
+            "8 .",
+            "9 Bb1:76",
+            "10 .",
+            "11 A1:72",
+            "12 .",
+            "13 D2:79",
+            "14 .",
+            "15 G1:70",
+            "16 .",
+            "",
+            "DRUMS",
+            "1 C2:90,D#3:60",
+            "2 .",
+            "3 D#3:55",
+            "4 .",
+            "5 F#2:52",
+            "6 .",
+            "7 D#3:62",
+            "8 .",
+            "9 C2:88",
+            "10 .",
+            "11 D#3:58",
+            "12 .",
+            "13 F#2:50",
+            "14 .",
+            "15 D#3:60",
+            "16 C2:76",
+            "",
+            "PIANO",
+            "1 C3:65,E3:60,G3:62",
+            "2 .",
+            "3 .",
+            "4 .",
+            "5 F3:70,A3:64,C4:60",
+            "6 .",
+            "7 .",
+            "8 Bb2:60,E3:63,A3:59",
+            "9 .",
+            "10 D3:68,F3:62,C4:60",
+            "11 .",
+            "12 .",
+            "13 G3:66,B3:61,D4:57",
+            "14 .",
+            "15 .",
+            "16 .",
+            "",
+            "SAX",
+            "1 .",
+            "2 .",
+            "3 E4:85",
+            "4 ^",
+            "5 B4:90",
+            "6 G4:75",
+            "7 .",
+            "8 D5:82",
+            "9 ^",
+            "10 .",
+            "11 A4:70",
+            "12 .",
+            "13 F4:76",
+            "14 ^",
+            "15 .",
+            "16 .",
+            "",
+            "FORMAT EXAMPLE B (Modal variation):",
+            "BASS",
+            "1 D2:78",
+            "2 .",
+            "3 F2:74",
+            "4 .",
+            "5 G2:80",
+            "6 .",
+            "7 A2:82",
+            "8 .",
+            "9 C3:77",
+            "10 .",
+            "11 Bb2:73",
+            "12 .",
+            "13 A2:76",
+            "14 .",
+            "15 G2:75",
+            "16 .",
+            "",
+            "PIANO",
+            "1 D3:64,A3:60",
+            "2 F3:66,C4:61",
+            "3 .",
+            "4 .",
+            "5 G3:70,D4:65",
+            "6 .",
+            "7 C4:67,E4:62",
+            "8 .",
+            "9 Bb3:63,D4:60",
+            "10 .",
+            "11 .",
+            "12 A3:66,C4:62",
+            "13 .",
+            "14 F3:64,G3:60",
+            "15 .",
+            "16 .",
+            "",
+            "SAX",
+            "1 D4:78",
+            "2 F4:81",
+            "3 A4:88",
+            "4 ^",
+            "5 .",
+            "6 C5:86",
+            "7 Bb4:79",
+            "8 G4:76",
+            "9 F4:74",
+            "10 .",
+            "11 D5:84",
+            "12 ^",
+            "13 C5:80",
+            "14 A4:77",
+            "15 .",
+            "16 .",
+            "",
+            "GUIDELINES:",
+            "- Let each chorus mutate; avoid recycling the previous cadence.",
+            "- Rests and unexpected accents are encouraged—rhythmic surprises keep the quartet alive.",
+            "- Stay in range and obey the tracker format, everything else is yours to reinvent.",
+        ]
+
+        if previous_context:
+            prompt.extend([
+                "",
+                "PREVIOUS SECTION:",
+                previous_context,
+                "",
+                "CRITICAL: Do not copy the previous section verbatim. Vary rhythm, contour, and voicings.",
+            ])
+
+        prompt.extend([
+            "",
+            f"Generate the new section now with exactly {steps} lines per instrument.",
+            "Start the output with the literal header 'BASS' on the first line.",
+        ])
+
+        return "\n".join(prompt)
