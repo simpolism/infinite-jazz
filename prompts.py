@@ -14,12 +14,11 @@ def get_format_description() -> str:
 
     return f"""
 TRACKER FORMAT:
-- Generate EXACTLY {steps} lines - NO MORE, NO LESS!
-- Each line is one {resolution} note
-- Count your lines carefully!
-- Format: NOTE:VELOCITY (e.g., C4:80)
-- Chords: Comma-separated (e.g., C4:70,E4:65,G4:68)
-- Rests: Use a single period (.)
+- Generate EXACTLY {steps} lines numbered 1 to {steps}
+- Format: "NUMBER SPACE NOTE:VELOCITY" (e.g., "1 C4:80" or "1 .")
+- When you write "{steps} ..." you are DONE - STOP generating!
+- Chords: Comma-separated (e.g., "1 C4:70,E4:65,G4:68")
+- Rests: Single period after the number (e.g., "1 .")
 - NEVER add periods after note:velocity pairs! Only use periods for rests!
 - Velocity: 0-127 (60-90 typical for jazz)
 - Note names: C, C#, D, D#, E, F, F#, G, G#, A, A#, B with octave (e.g., C4, F#2)
@@ -41,22 +40,38 @@ BASS GUIDELINES:
 - Velocity: 75-90 for quarter notes, 65-80 for walking
 
 TRACKER FORMAT EXAMPLE:
-C2:80
-.
-E2:75
-.
-G2:75
-.
-F2:70
-.
-C2:80
-.
-B1:75
-.
-A1:75
-.
-G1:70
-.
+1 C2:80
+2 .
+3 E2:75
+4 .
+5 G2:75
+6 .
+7 F2:70
+8 .
+9 C2:80
+10 .
+11 B1:75
+12 .
+13 A1:75
+14 .
+15 G1:70
+16 .
+17 C2:80
+18 .
+19 E2:75
+20 .
+21 G2:70
+22 .
+23 F2:75
+24 .
+25 E2:80
+26 .
+27 D2:75
+28 .
+29 C2:80
+30 .
+31 B1:75
+32 .
 
 Now generate a bassline. Output only the notes, starting immediately.
 """
@@ -96,22 +111,38 @@ DRUMS GUIDELINES:
 - Velocity: Kick 85-100, Snare 80-95, Cymbals 50-70
 
 TRACKER FORMAT EXAMPLE (swing feel - not every beat!):
-C2:90,D#3:60
-.
-D#3:55
-.
-D2:85,F#2:50
-.
-D#3:60
-.
-C2:85
-.
-D#3:55
-.
-D2:90,F#2:50
-.
-D#3:60
-C2:75
+1 C2:90,D#3:60
+2 .
+3 D#3:55
+4 .
+5 D2:85,F#2:50
+6 .
+7 D#3:60
+8 .
+9 C2:85
+10 .
+11 D#3:55
+12 .
+13 D2:90,F#2:50
+14 .
+15 D#3:60
+16 C2:75
+17 C2:90,D#3:60
+18 .
+19 D#3:55
+20 .
+21 D2:85,F#2:50
+22 .
+23 D#3:60
+24 .
+25 C2:85
+26 .
+27 D#3:55
+28 .
+29 D2:90,F#2:50
+30 C2:75,F#2:45
+31 D#3:60
+32 .
 
 You've heard the bass. Now generate drums that complement it. Output only the notes, starting immediately.
 """
@@ -143,21 +174,38 @@ PIANO GUIDELINES:
 - Velocity: 60-80 for comping, softer than bass and drums
 
 TRACKER FORMAT EXAMPLE:
-C3:65,E3:60,G3:62,B3:58
-.
-.
-.
-E3:68,G3:65,B3:62,D4:60
-.
-.
-C3:65,E3:62,B3:60
-.
-.
-.
-G3:65,B3:62,D4:58,F4:55
-.
-.
-.
+1 C3:65,E3:60,G3:62,B3:58
+2 .
+3 .
+4 .
+5 E3:68,G3:65,B3:62,D4:60
+6 .
+7 .
+8 C3:65,E3:62,B3:60
+9 .
+10 .
+11 .
+12 G3:65,B3:62,D4:58,F4:55
+13 .
+14 .
+15 .
+16 .
+17 C3:65,E3:60,G3:62
+18 .
+19 .
+20 .
+21 F3:68,A3:65,C4:62,E4:60
+22 .
+23 .
+24 D3:65,F3:62,A3:60
+25 .
+26 .
+27 .
+28 G3:65,B3:62,D4:58
+29 .
+30 .
+31 .
+32 .
 
 You've heard the bass and drums. Now add piano comping. Output only the notes, starting immediately.
 """
@@ -193,50 +241,90 @@ SAX GUIDELINES:
 - Velocity: 70-90 typical, accents up to 100
 
 BAD EXAMPLE (boring scale - DON'T DO THIS):
-C4:75
-D4:75
-E4:75
-F4:75
-G4:75
-A4:75
-B4:75
-C5:75
+1 C4:75
+2 D4:75
+3 E4:75
+4 F4:75
+5 G4:75
+6 A4:75
+7 B4:75
+8 C5:75
+9 D5:75
+10 E5:75
+11 F5:75
+12 G5:75
+13 A5:75
+14 B5:75
+15 C6:75
+16 D6:75
 
 GOOD EXAMPLE 1 - Bebop (leaps, space, variety):
-.
-.
-E4:85
-.
-B4:90
-G4:75
-.
-E4:80
-.
-.
-C5:85
-.
-A4:70
-.
-.
-.
+1 .
+2 .
+3 E4:85
+4 .
+5 B4:90
+6 G4:75
+7 .
+8 E4:80
+9 .
+10 .
+11 C5:85
+12 .
+13 A4:70
+14 .
+15 .
+16 .
+17 D5:85
+18 .
+19 .
+20 B4:80
+21 .
+22 G4:75
+23 D4:70
+24 .
+25 .
+26 E4:85
+27 .
+28 C5:90
+29 .
+30 .
+31 A4:75
+32 .
 
 GOOD EXAMPLE 2 - Blues phrase (repetition with variation):
-.
-D4:75
-D4:80
-D4:70
-.
-.
-F4:85
-D#4:90
-D4:75
-.
-.
-.
-A3:80
-.
-.
-.
+1 .
+2 D4:75
+3 D4:80
+4 D4:70
+5 .
+6 .
+7 F4:85
+8 D#4:90
+9 D4:75
+10 .
+11 .
+12 .
+13 A3:80
+14 .
+15 .
+16 .
+17 .
+18 D4:75
+19 D4:82
+20 D4:70
+21 .
+22 .
+23 F4:85
+24 D#4:88
+25 D4:75
+26 .
+27 C4:80
+28 .
+29 .
+30 A3:85
+31 .
+32 .
 
 You've heard the bass, drums, and piano. Now add a sax line. Output only the notes, starting immediately.
 """
@@ -276,9 +364,9 @@ def get_batched_quartet_prompt(previous_context: str = "") -> str:
     prompt = f"""You are a jazz quartet generating {bars} bars of music. Output all 4 instruments in tracker format.
 
 FORMAT RULES:
-- {steps} lines per instrument (one line = one {resolution} note)
-- Each line: NOTE:VELOCITY (e.g., C2:80) or . (rest)
-- Chords: Multiple notes on same line (e.g., C3:65,E3:62,G3:60)
+- {steps} numbered lines per instrument (one line = one {resolution} note)
+- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80") or NUMBER . (e.g., "1 .")
+- Chords: Multiple notes on same line (e.g., "1 C3:65,E3:62,G3:60")
 - Velocity: 0-127 (60-90 typical for jazz)
 
 INSTRUMENT ROLES:
@@ -312,79 +400,143 @@ SAX - Lead melody and improvisation
 - Mix short bursts with long notes - vary rhythm!
 - Velocity: 70-90, accents up to 100
 
-FORMAT EXAMPLE (showing style, not exact length):
+FORMAT EXAMPLE:
 
 BASS
-C2:80
-.
-E2:75
-.
-G2:75
-.
-F2:70
-.
-C2:80
-.
-B1:75
-.
-A1:75
-.
-G1:70
-.
+1 C2:80
+2 .
+3 E2:75
+4 .
+5 G2:75
+6 .
+7 F2:70
+8 .
+9 C2:80
+10 .
+11 B1:75
+12 .
+13 A1:75
+14 .
+15 G1:70
+16 .
+17 C2:80
+18 .
+19 E2:75
+20 .
+21 G2:70
+22 .
+23 F2:75
+24 .
+25 E2:80
+26 .
+27 D2:75
+28 .
+29 C2:80
+30 .
+31 B1:75
+32 .
 
 DRUMS
-C2:90,D#3:60
-.
-D#3:55
-.
-D2:85,F#2:50
-.
-D#3:60
-.
-C2:85
-.
-D#3:55
-.
-D2:90,F#2:50
-.
-D#3:60
-C2:75
+1 C2:90,D#3:60
+2 .
+3 D#3:55
+4 .
+5 D2:85,F#2:50
+6 .
+7 D#3:60
+8 .
+9 C2:85
+10 .
+11 D#3:55
+12 .
+13 D2:90,F#2:50
+14 .
+15 D#3:60
+16 C2:75
+17 C2:90,D#3:60
+18 .
+19 D#3:55
+20 .
+21 D2:85,F#2:50
+22 .
+23 D#3:60
+24 .
+25 C2:85
+26 .
+27 D#3:55
+28 .
+29 D2:90,F#2:50
+30 C2:75,F#2:45
+31 D#3:60
+32 .
 
 PIANO
-C3:65,E3:60,G3:62
-.
-.
-.
-E3:68,G3:65,B3:62
-.
-.
-C3:65,E3:62,B3:60
-.
-.
-.
-G3:65,B3:62,D4:58
-.
-.
-.
-.
+1 C3:65,E3:60,G3:62
+2 .
+3 .
+4 .
+5 E3:68,G3:65,B3:62
+6 .
+7 .
+8 C3:65,E3:62,B3:60
+9 .
+10 .
+11 .
+12 G3:65,B3:62,D4:58
+13 .
+14 .
+15 .
+16 .
+17 C3:65,E3:60,G3:62
+18 .
+19 .
+20 .
+21 F3:68,A3:65,C4:62
+22 .
+23 .
+24 D3:65,F3:62,A3:60
+25 .
+26 .
+27 .
+28 G3:65,B3:62,D4:58
+29 .
+30 .
+31 .
+32 .
 
 SAX
-.
-.
-E4:85
-.
-B4:90
-G4:75
-.
-E4:80
-.
-.
-C5:85
-.
-A4:70
-.
-.
-.
+1 .
+2 .
+3 E4:85
+4 .
+5 B4:90
+6 G4:75
+7 .
+8 E4:80
+9 .
+10 .
+11 C5:85
+12 .
+13 A4:70
+14 .
+15 .
+16 .
+17 D5:85
+18 .
+19 .
+20 B4:80
+21 .
+22 G4:75
+23 D4:70
+24 .
+25 .
+26 E4:85
+27 .
+28 C5:90
+29 .
+30 .
+31 A4:75
+32 .
 """
 
     if previous_context:
@@ -398,7 +550,7 @@ A4:70
 
 """
 
-    prompt += f"Generate YOUR version now. Be creative with the sax! Format exactly like above. Start with 'BASS' then exactly {config.get_total_steps()} lines:"
+    prompt += f"Generate YOUR version now. Be creative with the sax! Format exactly like above with {config.get_total_steps()} lines per instrument:"
 
     return prompt
 

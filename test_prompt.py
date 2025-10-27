@@ -223,6 +223,9 @@ def check_format(lines: list, instrument: str, issues: list):
     invalid_count = 0
 
     for i, line in enumerate(lines, 1):
+        # Strip line numbers if present (format: "1 C2:80" or "1. C2:80" -> "C2:80")
+        line = re.sub(r'^\d+\.?\s+', '', line)
+
         if line == '.':
             rest_count += 1
         elif ':' in line:

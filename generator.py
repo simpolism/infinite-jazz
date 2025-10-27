@@ -202,12 +202,23 @@ class GenerationPipeline:
         - Remove section headers if present
         - Strip extra whitespace
         - Remove markdown code blocks
+        - Remove line numbers
+        - Normalize unicode musical symbols
         """
         # Remove markdown code blocks
         text = re.sub(r'```[\w]*\n?', '', text)
 
         # Remove section headers (BASS, DRUMS, etc.)
         text = re.sub(r'^(BASS|DRUMS|PIANO|SAX)\s*\n?', '', text, flags=re.MULTILINE)
+
+        # Remove line numbers (format: "1 C2:80" or "1. C2:80" -> "C2:80")
+        # Handle both "1 " and "1. " formats (LLMs often add periods)
+        text = re.sub(r'^\d+\.?\s+', '', text, flags=re.MULTILINE)
+
+        # Normalize unicode musical symbols to ASCII equivalents
+        # ♯ (U+266F) -> #
+        # ♭ (U+266D) -> b
+        text = text.replace('♯', '#').replace('♭', 'b')
 
         # Remove leading/trailing whitespace
         text = text.strip()
@@ -329,9 +340,9 @@ class GenerationPipeline:
             if attempt > 1:
                 attempt_prompt += (
                     "\n\nIMPORTANT: Respond with exactly "
-                    f"{config.get_total_steps()} lines.\n"
-                    "Each line must be either NOTE:VELOCITY (e.g., C2:80) "
-                    "or a single period '.' for a rest.\n"
+                    f"{config.get_total_steps()} numbered lines.\n"
+                    "Each line must be NUMBER NOTE:VELOCITY (e.g., '1 C2:80') "
+                    "or NUMBER . (e.g., '1 .') for a rest.\n"
                     "Do not include explanations or leave the response blank."
                 )
                 if attempt == attempts:

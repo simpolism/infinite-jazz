@@ -116,8 +116,13 @@ class TrackerParser:
             pitch = TrackerParser.note_to_midi(pitch_str.strip())
             velocity = int(velocity_digits)
 
-            if not 0 <= velocity <= 127:
-                raise ValueError(f"Velocity out of range (0-127): {velocity}")
+            # Clamp velocity to valid MIDI range (0-127) instead of failing
+            if velocity < 0:
+                print(f"  Warning: Velocity {velocity} too low, clamping to 0")
+                velocity = 0
+            elif velocity > 127:
+                print(f"  Warning: Velocity {velocity} too high, clamping to 127")
+                velocity = 127
 
             notes.append(Note(pitch=pitch, velocity=velocity))
 
@@ -140,6 +145,10 @@ class TrackerParser:
             if not line:
                 continue
 
+            # Strip line number if present (format: "1 C2:80" or "1. C2:80")
+            # Match optional number (with optional period) followed by whitespace
+            line = re.sub(r'^\d+\.?\s+', '', line)
+
             try:
                 notes = TrackerParser.parse_note_entry(line)
                 is_rest = len(notes) == 0
@@ -157,14 +166,16 @@ class TrackerParser:
 
         Expected format:
         BASS
-        C2:80
-        .
-        E2:75
+        1 C2:80
+        2 .
+        3 E2:75
         ...
 
         DRUMS
-        C1:90,F#1:60
+        1 C1:90,F#1:60
         ...
+
+        Note: Line numbers are optional and will be automatically stripped if present.
         """
         lines = tracker_text.strip().split('\n')
         tracks = {}

@@ -38,23 +38,23 @@ TEST_PROMPTS = [
     },
     {
         'name': 'Full bass prompt (short)',
-        'system': '''You are a jazz bassist. Generate 8 lines in tracker format.
+        'system': '''You are a jazz bassist. Generate 8 numbered lines in tracker format.
 
 FORMAT:
-- Each line: NOTE:VELOCITY (e.g., C2:80) or . (rest)
+- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80") or NUMBER . (e.g., "1 .")
 - Range: E1 to G2 only
 - Velocity: 70-85
 
 EXAMPLE:
-C2:80
-.
-E2:75
-.
-G2:75
-.
-F2:70
-.''',
-        'user': 'Generate 8 lines of bass notes now:',
+1 C2:80
+2 .
+3 E2:75
+4 .
+5 G2:75
+6 .
+7 F2:70
+8 .''',
+        'user': 'Generate 8 numbered lines of bass notes now (1-8):',
         'max_tokens': 200
     }
 ]

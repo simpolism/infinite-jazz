@@ -313,9 +313,13 @@ class OpenAIBackend:
 
                 # Add explicit start trigger to user message
                 if "Generate YOUR version now" in marker:
-                    user_msg += "\n\nStart your output with 'BASS' on the first line, then provide exactly 16 lines of notes:"
+                    import config
+                    steps = config.get_total_steps()
+                    user_msg += f"\n\nStart your output with 'BASS' on the first line, then provide exactly {steps} numbered lines per instrument:"
                 elif "Output only the notes" in marker:
-                    user_msg += "\n\nBegin outputting notes now:"
+                    import config
+                    steps = config.get_total_steps()
+                    user_msg += f"\n\nBegin outputting {steps} numbered lines now:"
 
                 return system_msg, user_msg
 
