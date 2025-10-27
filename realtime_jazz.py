@@ -105,7 +105,7 @@ Examples:
         help='Number of tracker steps per instrument to include from the previous section (default: 32)'
     )
     parser.add_argument(
-        '--prompt-flavor',
+        '--prompt',
         help='Optional creative direction appended to the base prompt (e.g., "bouncy, upbeat")'
     )
     return parser
@@ -143,7 +143,7 @@ def main(argv: Optional[list[str]] = None):
         output_dir=args.output_dir,
         verbose=args.verbose,
         context_steps=max(0, args.context_steps),
-        prompt_flavor=args.prompt_flavor.strip() if args.prompt_flavor else None,
+        prompt=args.prompt.strip() if args.prompt else None,
     )
 
     app = InfiniteJazzApp(

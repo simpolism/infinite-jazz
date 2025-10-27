@@ -150,8 +150,8 @@ class TrackerParser:
         for line_num, line in enumerate(lines, 1):
             line = line.strip()
 
-            # Skip empty lines
-            if not line:
+            # Skip empty or comment lines
+            if not line or line.startswith('#'):
                 continue
 
             # Strip line number if present (format: "1 C2:80" or "1. C2:80")
@@ -193,6 +193,10 @@ class TrackerParser:
 
         for line in lines:
             line = line.strip()
+
+            # Skip comment lines anywhere in the file
+            if line.startswith('#'):
+                continue
 
             # Check if this is a section header
             if line in ['BASS', 'DRUMS', 'PIANO', 'SAX']:

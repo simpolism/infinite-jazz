@@ -19,7 +19,8 @@
 - Maintain tracker constants (`BASS`, `DRUMS`, `PIANO`, `SAX`) and bar counts defined in `config.py` to stay compatible with live playback.
 - Keep `PromptBuilder.style_palette` curated; rotating styles are a cheap lever for variety while remaining easy to override in experiments.
 - Adjust continuity with the CLI flag `--context-steps` (default 32); higher values feed more tracker lines back into the prompt, while 0 starts each section clean.
-- Use `--prompt-flavor` to append collaborator notes (e.g., "bouncy, upbeat") without editing base prompts.
+- Use `--prompt` to append collaborator notes (e.g., "bouncy, upbeat") without editing base prompts.
+- Exported tracker `.txt` files begin with `# key: value` metadata so you can recover tempo/config; `tracker_parser` strips these automatically.
 
 ## Testing Guidelines
 - There is no automated suite; validate changes by running `.venv/bin/python realtime_jazz.py --save-output --output-dir output/dev` and confirming tracker/MIDI continuity.

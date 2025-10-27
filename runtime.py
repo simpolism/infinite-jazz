@@ -36,7 +36,8 @@ class RealtimeJazzGenerator:
         self.output_dir = Path(output_dir)
         self.verbose = verbose
         self.player = RealtimePlayer(audio_backend)
-        self.player_started = False
+        self.context_steps = context_steps
+        self.extra_prompt = extra_prompt
 
         self.run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -51,6 +52,7 @@ class RealtimeJazzGenerator:
             context_steps=context_steps,
             extra_prompt=extra_prompt
         )
+        self.prefill_delay = 0.5
         self.midi_converter = MIDIConverter(runtime_config)
 
         self.is_running = False
@@ -69,9 +71,8 @@ class RealtimeJazzGenerator:
         ]
         if scheduled:
             self.player.schedule_messages(scheduled)
-            if not self.player_started:
+            if not self.player.is_playing:
                 self.player.play()
-                self.player_started = True
 
         num_steps = len(next(iter(tracks.values())).steps) if tracks else 0
         actual_duration = self._calculate_section_duration_from_steps(num_steps)
@@ -101,6 +102,8 @@ class RealtimeJazzGenerator:
             buffer_size = self.generator.buffer_size
             initial_prefill = buffer_size if num_sections is None else min(buffer_size, num_sections)
             self.generator.prefill_buffer(count=initial_prefill)
+            if self.prefill_delay > 0:
+                time.sleep(self.prefill_delay)
 
             print(f"\n{'='*60}")
             print("Starting playback... (Press Ctrl+C to stop)")
@@ -152,7 +155,6 @@ class RealtimeJazzGenerator:
 
             print("\nFinishing playback...")
             self.player.stop()
-            self.player_started = False
         except KeyboardInterrupt:
             print("\n\nStopping...")
         finally:
@@ -173,8 +175,25 @@ class RealtimeJazzGenerator:
             print(f"✓ Saved complete MIDI: {midi_file_path}")
 
             txt_file_path = self.output_dir / f"complete_{self.run_timestamp}.txt"
-            save_generated_section(combined_tracks, str(txt_file_path))
+            save_generated_section(
+                combined_tracks,
+                str(txt_file_path),
+                metadata=self._build_metadata()
+            )
 
         self.player.close()
-        self.player_started = False
         print("Done!")
+
+    def _build_metadata(self) -> Dict[str, str]:
+        meta = {
+            "tempo": str(self.config.tempo),
+            "note_mode": self.config.note_mode,
+            "swing_enabled": str(self.config.swing_enabled),
+            "swing_ratio": str(self.config.swing_ratio),
+            "bars_per_generation": str(self.config.bars_per_generation),
+            "time_signature": f"{self.config.time_signature[0]}/{self.config.time_signature[1]}",
+            "context_steps": str(self.context_steps),
+        }
+        if self.extra_prompt:
+            meta["prompt"] = self.extra_prompt
+        return meta

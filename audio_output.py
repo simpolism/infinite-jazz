@@ -251,6 +251,8 @@ class RealtimePlayer:
         Args:
             messages: List of (time_in_seconds, mido.Message) tuples
         """
+        # ensure monotonically increasing schedule
+        messages = sorted(messages, key=lambda item: item[0])
         for msg in messages:
             self.message_queue.put(msg)
 
@@ -276,6 +278,10 @@ class RealtimePlayer:
                 # Wait until scheduled time
                 current_time = time.time() - start_time
                 wait_time = scheduled_time - current_time
+
+                if wait_time < -0.1:
+                    # message schedule was already in the past; treat as drift and send immediately
+                    wait_time = 0
 
                 if wait_time > 0:
                     time.sleep(wait_time)

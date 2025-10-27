@@ -2,6 +2,7 @@
 
 from typing import Dict, Optional
 import re
+import time
 
 from llm_interface import LLMInterface
 from prompts import PromptBuilder
@@ -92,7 +93,7 @@ class GenerationPipeline:
         # Generate with higher token limit (need to fit all 4 instruments)
         # Reasoning models need MUCH more tokens (they use tokens for internal reasoning)
         gen_config = {
-            'max_tokens': 3200,  # Leave headroom for richer phrasing
+            'max_tokens': 4096,  # Leave headroom for longer sections and richer phrasing
             'temperature': 1.05,
             'top_p': 0.99,
             'repeat_penalty': 1.0,
@@ -355,6 +356,7 @@ class ContinuousGenerator:
         for i in range(target):
             context = self.pipeline.get_previous_context()
             section = self.pipeline.generate_section(context)
+
             self.buffer.append(section)
             if self.verbose:
                 print(f"\nBuffered section {i+1}/{target}")
@@ -441,7 +443,11 @@ def concatenate_sections(sections_list: list) -> Dict[str, InstrumentTrack]:
     return combined
 
 
-def save_generated_section(tracks: Dict[str, InstrumentTrack], filepath: str):
+def save_generated_section(
+    tracks: Dict[str, InstrumentTrack],
+    filepath: str,
+    metadata: Optional[Dict[str, str]] = None
+):
     """
     Save generated section to tracker file
 
@@ -463,7 +469,16 @@ def save_generated_section(tracks: Dict[str, InstrumentTrack], filepath: str):
 
             sections.append(f"{instrument}\n" + '\n'.join(lines))
 
-    output = '\n\n'.join(sections)
+    header_lines = []
+    if metadata:
+        for key, value in metadata.items():
+            header_lines.append(f"# {key}: {value}")
+
+    parts = []
+    if header_lines:
+        parts.append('\n'.join(header_lines))
+    parts.append('\n\n'.join(sections))
+    output = '\n\n'.join(parts)
 
     with open(filepath, 'w') as f:
         f.write(output)
