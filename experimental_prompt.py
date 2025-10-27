@@ -67,15 +67,20 @@ class PromptBuilder:
     style: str = "exploratory"
     generation_count: int = 0
 
-    def build_quartet_prompt(self, previous_context: str = "") -> str:
-        """Construct the prompt for generating all instruments in one pass."""
+    def build_quartet_prompt(self, previous_context: str = "", extra_prompt: str = "") -> str:
+        """Construct the prompt for generating all instruments in one pass.
+
+        Args:
+            previous_context: Previous section for musical continuity
+            extra_prompt: Additional instructions to guide the generation
+        """
         steps = self.config.total_steps
         bars = self.config.bars_per_generation
         tempo = self.config.tempo
-        
+
         # Track generations to rotate approaches
         self.generation_count += 1
-        
+
         # Select varying elements
         exploration = EXPLORATION_MODES[self.generation_count % len(EXPLORATION_MODES)]
         constraint = random.choice(DYNAMIC_CONSTRAINTS)
@@ -141,6 +146,13 @@ class PromptBuilder:
                 previous_context,
                 "",
                 f"CONTEXT NOTE: {context_instruction}",
+            ])
+
+        if extra_prompt:
+            prompt.extend([
+                "",
+                "PLAYER DIRECTION:",
+                extra_prompt,
             ])
 
         prompt.extend([

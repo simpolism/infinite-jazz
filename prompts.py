@@ -41,8 +41,13 @@ class PromptBuilder:
     config: RuntimeConfig
     style: str = "modern swing"
 
-    def build_quartet_prompt(self, previous_context: str = "") -> str:
-        """Construct the prompt for generating all instruments in one pass."""
+    def build_quartet_prompt(self, previous_context: str = "", extra_prompt: str = "") -> str:
+        """Construct the prompt for generating all instruments in one pass.
+
+        Args:
+            previous_context: Previous section for musical continuity
+            extra_prompt: Additional instructions to guide the generation
+        """
         steps = self.config.total_steps
         bars = self.config.bars_per_generation
         tempo = self.config.tempo
@@ -89,10 +94,26 @@ class PromptBuilder:
                 "CRITICAL: Do not copy the previous section verbatim. Vary rhythm, contour, and voicings.",
             ])
 
+        if extra_prompt:
+            prompt.extend([
+                "",
+                "PLAYER DIRECTION:",
+                extra_prompt,
+            ])
+
         prompt.extend([
             "",
-            f"Generate the new section now with exactly {steps} lines per instrument.",
-            "Start the output with the literal header 'BASS' on the first line.",
+            "OUTPUT REQUIREMENTS:",
+            "1. First line must be: BASS",
+            f"2. Follow with exactly {steps} numbered lines for bass",
+            "3. Then: DRUMS (blank line before is OK)",
+            f"4. Follow with exactly {steps} numbered lines for drums",
+            "5. Then: PIANO",
+            f"6. Follow with exactly {steps} numbered lines for piano",
+            "7. Then: SAX",
+            f"8. Follow with exactly {steps} numbered lines for sax",
+            "",
+            "Generate the tracker data now:",
         ])
 
         return "\n".join(prompt)

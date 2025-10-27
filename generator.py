@@ -111,10 +111,8 @@ class GenerationPipeline:
         if self.verbose:
             print("[BATCHED GENERATION]")
 
-        # Build batched prompt
-        prompt = self.prompt_builder.build_quartet_prompt(previous_context)
-        if self.extra_prompt:
-            prompt += "\n\nPLAYER DIRECTION: " + self.extra_prompt
+        # Build batched prompt with extra_prompt integrated
+        prompt = self.prompt_builder.build_quartet_prompt(previous_context, self.extra_prompt)
 
         # Generate with higher token limit (need to fit all 4 instruments)
         # Reasoning models need MUCH more tokens (they use tokens for internal reasoning)
