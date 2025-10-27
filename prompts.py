@@ -39,7 +39,6 @@ class PromptBuilder:
     """Build prompts for quartet generation with stylistic guidance."""
 
     config: RuntimeConfig
-    style: str = "modern swing"
 
     def build_quartet_prompt(self, previous_context: str = "", extra_prompt: str = "") -> str:
         """Construct the prompt for generating all instruments in one pass.
@@ -53,7 +52,7 @@ class PromptBuilder:
         tempo = self.config.tempo
 
         prompt = [
-            f"You are a {self.style} jazz quartet generating {bars} bars of music.",
+            f"You are a jazz quartet generating {bars} bars of music.",
             "Output all 4 instruments in tracker format exactly as specified.",
             f"Approximate tempo: {tempo} BPM on a 16th-note grid.",
             "",

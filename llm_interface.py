@@ -196,11 +196,6 @@ class OpenAIBackend:
             'top_p': top_p,
         }
 
-        if 'reasoning_effort' not in kwargs:
-            completion_kwargs['reasoning_effort'] = 'low'
-        else:
-            completion_kwargs['reasoning_effort'] = kwargs['reasoning_effort']
-
         if stop:
             completion_kwargs['stop'] = stop
 
@@ -210,10 +205,25 @@ class OpenAIBackend:
         try:
             response = self.client.chat.completions.create(**completion_kwargs)
         except Exception as exc:
-            raise RuntimeError(
-                "OpenAI-compatible backend request failed. "
-                "Check connectivity, API key, model availability, and base URL."
-            ) from exc
+            # Provide more detailed error messages based on exception type
+            error_msg = f"OpenAI-compatible backend request failed: {type(exc).__name__}: {str(exc)}\n"
+
+            # Add specific guidance based on common error patterns
+            exc_str = str(exc).lower()
+            if 'api key' in exc_str or 'authentication' in exc_str or '401' in exc_str:
+                error_msg += "→ Check that your API key is valid and properly set"
+            elif 'not found' in exc_str or '404' in exc_str:
+                error_msg += f"→ Model '{self.model_name}' may not be available at {self.base_url}"
+            elif 'rate limit' in exc_str or '429' in exc_str:
+                error_msg += "→ Rate limit exceeded, try again later"
+            elif 'connection' in exc_str or 'timeout' in exc_str:
+                error_msg += f"→ Cannot connect to {self.base_url}, check network/endpoint"
+            elif 'invalid' in exc_str and 'parameter' in exc_str:
+                error_msg += f"→ Invalid parameters for model '{self.model_name}'"
+            else:
+                error_msg += f"→ Check connectivity, API key, model availability, and base URL ({self.base_url})"
+
+            raise RuntimeError(error_msg) from exc
 
         gen_time = time.time() - start_time
         choice = response.choices[0]
