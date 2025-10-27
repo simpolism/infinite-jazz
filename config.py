@@ -11,6 +11,10 @@ RESOLUTION = '16th'  # '8th' or '16th' note resolution
 # Note duration mode
 NOTE_MODE = 'trigger'  # 'trigger' or 'sustain'
 
+# Swing rhythm configuration
+SWING_ENABLED = True  # Enable swing feel for off-beats
+SWING_RATIO = 0.67  # 0.67 = 2:1 swing (typical jazz), 0.5 = straight (no swing), 0.75 = heavy swing
+
 # MIDI configuration
 TICKS_PER_BEAT = 480  # Standard MIDI resolution
 

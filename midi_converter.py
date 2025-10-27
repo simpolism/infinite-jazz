@@ -21,6 +21,41 @@ class MIDIConverter:
         self.tempo = tempo or config.TEMPO
         self.ticks_per_step = config.get_ticks_per_step()
 
+    def _calculate_swing_time(self, step_idx: int) -> int:
+        """
+        Calculate time position for a step with optional swing adjustment.
+
+        Swing feel: off-beat 16th notes are delayed, creating a "long-short" feel.
+        Example with 2:1 swing (ratio=0.67):
+          - Steps 0,2,4,6... (on-beats): normal timing
+          - Steps 1,3,5,7... (off-beats): delayed by 67% through the 8th note
+
+        Args:
+            step_idx: Step index (0-based)
+
+        Returns:
+            Time in MIDI ticks
+        """
+        if not config.SWING_ENABLED or config.RESOLUTION != '16th':
+            # No swing, or not 16th notes - use straight timing
+            return step_idx * self.ticks_per_step
+
+        # Determine if this is an on-beat or off-beat
+        pair_idx = step_idx // 2  # Which 8th note pair (0, 1, 2, ...)
+        is_offbeat = step_idx % 2 == 1
+
+        # Calculate base time for this 8th note pair
+        eighth_note_ticks = self.ticks_per_step * 2  # Two 16th notes = one 8th note
+        base_time = pair_idx * eighth_note_ticks
+
+        if is_offbeat:
+            # Off-beat: delayed by swing ratio
+            swing_delay = int(eighth_note_ticks * config.SWING_RATIO)
+            return base_time + swing_delay
+        else:
+            # On-beat: normal timing
+            return base_time
+
     def create_midi_file(self, tracks: Dict[str, InstrumentTrack]) -> mido.MidiFile:
         """
         Convert tracker data to MIDI file
@@ -70,7 +105,7 @@ class MIDIConverter:
         current_time = 0  # Absolute time position in ticks
 
         for step_idx, step in enumerate(track_data.steps):
-            step_start_time = step_idx * self.ticks_per_step
+            step_start_time = self._calculate_swing_time(step_idx)
 
             if config.NOTE_MODE == 'trigger':
                 # Trigger mode: note on, then note off after step duration
@@ -89,7 +124,8 @@ class MIDIConverter:
                             current_time = step_start_time
 
                     # Note-off events after step duration
-                    note_off_time = step_start_time + self.ticks_per_step
+                    # Calculate when next step starts (accounts for swing)
+                    note_off_time = self._calculate_swing_time(step_idx + 1)
                     for note_idx, note in enumerate(step.notes):
                         delta_time = note_off_time - current_time if note_idx == 0 else 0
                         track.append(mido.Message(
@@ -152,6 +188,37 @@ class MIDIConverter:
 
         return track
 
+    def _calculate_swing_time_seconds(self, step_idx: int, time_per_step: float) -> float:
+        """
+        Calculate time position for a step in seconds with optional swing adjustment.
+
+        Args:
+            step_idx: Step index (0-based)
+            time_per_step: Duration of one step in seconds (straight timing)
+
+        Returns:
+            Time in seconds
+        """
+        if not config.SWING_ENABLED or config.RESOLUTION != '16th':
+            # No swing, or not 16th notes - use straight timing
+            return step_idx * time_per_step
+
+        # Determine if this is an on-beat or off-beat
+        pair_idx = step_idx // 2  # Which 8th note pair
+        is_offbeat = step_idx % 2 == 1
+
+        # Calculate base time for this 8th note pair
+        eighth_note_duration = time_per_step * 2  # Two 16th notes = one 8th note
+        base_time = pair_idx * eighth_note_duration
+
+        if is_offbeat:
+            # Off-beat: delayed by swing ratio
+            swing_delay = eighth_note_duration * config.SWING_RATIO
+            return base_time + swing_delay
+        else:
+            # On-beat: normal timing
+            return base_time
+
     def _get_program(self, instrument_name: str) -> int:
         """
         Get General MIDI program number for instrument
@@ -208,7 +275,7 @@ class MIDIConverter:
             # Generate note events
             for step_idx, step in enumerate(steps_to_process):
                 absolute_step = start_step + step_idx
-                step_time = absolute_step * time_per_step
+                step_time = self._calculate_swing_time_seconds(absolute_step, time_per_step)
 
                 if not step.is_rest:
                     # Note on
@@ -220,7 +287,8 @@ class MIDIConverter:
 
                     # Note off (for trigger mode)
                     if config.NOTE_MODE == 'trigger':
-                        note_off_time = step_time + time_per_step
+                        # Note off at the next step's time (accounts for swing)
+                        note_off_time = self._calculate_swing_time_seconds(absolute_step + 1, time_per_step)
                         for note in step.notes:
                             messages.append((
                                 note_off_time,
