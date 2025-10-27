@@ -36,6 +36,8 @@ class GenerationPipeline:
         self.config = runtime_config
         self.prompt_builder = PromptBuilder(runtime_config)
         self.context_steps = max(0, context_steps)
+        steps_per_section = self.config.total_steps or 1
+        self.history_limit = max(3, (self.context_steps // steps_per_section) + 2)
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -62,8 +64,8 @@ class GenerationPipeline:
 
         # Update history
         self.history.append(generated_text)
-        if len(self.history) > 2:
-            self.history.pop(0)  # Keep only last 2 sections
+        if len(self.history) > self.history_limit:
+            self.history.pop(0)
 
         return tracks
 
@@ -277,25 +279,22 @@ class GenerationPipeline:
 
     def get_previous_context(self) -> str:
         """Get previous section for continuity (truncated to last few notes)"""
-        if not self.history:
+        if not self.history or self.context_steps <= 0:
             return ""
+        aggregated = {instrument: [] for instrument in self.GENERATION_ORDER}
 
-        # Return only the ENDINGS of the last section (last 4 notes per instrument)
-        # This provides continuity without overwhelming small models with patterns to copy
-        prev = self.history[-1]
-        truncated = {}
+        for section in self.history:
+            for instrument in self.GENERATION_ORDER:
+                if instrument in section and section[instrument]:
+                    aggregated[instrument].extend(section[instrument].split('\n'))
 
-        steps_to_keep = self.context_steps if self.context_steps > 0 else 0
-
-        for instrument in self.GENERATION_ORDER:
-            if instrument in prev:
-                lines = prev[instrument].split('\n')
-                truncated[instrument] = '\n'.join(lines[-steps_to_keep:]) if steps_to_keep else ""
-
+        steps_to_keep = self.context_steps
         sections = []
         for instrument in self.GENERATION_ORDER:
-            if instrument in truncated and truncated[instrument]:
-                sections.append(f"{instrument} (ending):\n...{truncated[instrument]}")
+            lines = aggregated[instrument][-steps_to_keep:]
+            if lines:
+                ellipsis = "..." if len(aggregated[instrument]) > steps_to_keep else ""
+                sections.append(f"{instrument} (recent):\n{ellipsis}" + '\n'.join(lines))
 
         return '\n\n'.join(sections)
 
