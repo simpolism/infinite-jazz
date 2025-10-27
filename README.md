@@ -8,10 +8,10 @@ Infinite Jazz stitches together large-language-model composition, tracker parsin
 
 ## Example Output
 
-<audio controls>
-  <source src="https://github.com/simpolism/infinite-jazz/releases/download/v1.0.0/example.mp3" type="audio/mpeg">
-  Your browser does not support the audio element.
-</audio>
+
+
+https://github.com/user-attachments/assets/e2c88863-a5c6-492a-8606-d2ed5f727e6b
+
 
 *AI-generated jazz quartet improvisation*
 
