@@ -91,25 +91,27 @@ DRUMS GUIDELINES:
   * A#2 (46): Open hi-hat
   * C#3 (49): Crash cymbal
   * D#3 (51): Ride cymbal
+- Swing feel: Don't play every 16th note! Leave space with rests (.)
+- Ride/hi-hat typically on swing 8ths (every OTHER 16th note or less)
 - Velocity: Kick 85-100, Snare 80-95, Cymbals 50-70
 
-TRACKER FORMAT EXAMPLE:
+TRACKER FORMAT EXAMPLE (swing feel - not every beat!):
 C2:90,D#3:60
-D#3:50
-D2:85,D#3:60
-D#3:50
-C2:85,D#3:60
-D#3:50
-D2:90,D#3:65
-D#3:50
-C2:90,D#3:60
-D#3:50
-D2:85,D#3:60
-D#3:50
-C2:85,D#3:60
-D#3:50
-D2:90,D#3:65
-C2:75,F#2:55
+.
+D#3:55
+.
+D2:85,F#2:50
+.
+D#3:60
+.
+C2:85
+.
+D#3:55
+.
+D2:90,F#2:50
+.
+D#3:60
+C2:75
 
 You've heard the bass. Now generate drums that complement it. Output only the notes, starting immediately.
 """
@@ -290,6 +292,8 @@ BASS - Walking bassline foundation
 
 DRUMS - Swing rhythm (General MIDI drum map)
 - C2: Kick | D2: Snare | F#2: Hi-hat | D#3: Ride cymbal
+- Swing feel: Don't play every 16th note! Use rests (.)
+- Ride/hi-hat on swing 8ths (every other 16th note or less)
 - Velocity: Kick/Snare 85-95, Cymbals 50-70
 
 PIANO - Chord comping
@@ -330,20 +334,20 @@ G1:70
 
 DRUMS
 C2:90,D#3:60
-D#3:50
-D2:85,D#3:60
-D#3:50
-C2:85,D#3:60
-D#3:50
-D2:90,D#3:65
-D#3:50
-C2:90,D#3:60
-D#3:50
-D2:85,D#3:60
-D#3:50
-C2:85,D#3:60
-D#3:50
-D2:90,D#3:65
+.
+D#3:55
+.
+D2:85,F#2:50
+.
+D#3:60
+.
+C2:85
+.
+D#3:55
+.
+D2:90,F#2:50
+.
+D#3:60
 C2:75
 
 PIANO

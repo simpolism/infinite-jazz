@@ -176,38 +176,14 @@ class RealtimeJazzGenerator:
 
             prefilled = self.generator.prefill_buffer(count=initial_prefill) or 0
 
-            # Pre-load all buffered sections into queue BEFORE starting playback
-            print(f"Pre-loading {prefilled} buffered sections into playback queue...")
-            section_num = 0
-            current_time = 0.0  # Track absolute playback time
-
-            # Pull ONLY the initial buffered sections (don't loop forever)
-            # Don't start background generation yet - wait until playback starts
-            for _ in range(prefilled):
-                print(f"\n--- Section {section_num + 1} ---")
-                # Don't refill buffer during initial load - we already prefilled it
-                tracks = self.generator.get_next_section(continue_buffering=False)
-
-                # Track section for final export
-                self.all_sections.append(tracks)
-
-                # Add MIDI messages to queue and get actual duration
-                print(f"Queueing section {section_num + 1} for playback...")
-                actual_duration, msg_count = self._add_section_to_queue(tracks, current_time)
-                if self.verbose:
-                    print(f"  Added {msg_count} MIDI messages (duration {actual_duration:.2f}s)")
-                else:
-                    print(f"  Section duration {actual_duration:.2f}s")
-
-                # Advance time for next section (use actual MIDI duration)
-                current_time += actual_duration
-                section_num += 1
-
             print(f"\n{'='*60}")
             print("Starting playback... (Press Ctrl+C to stop)")
             print(f"{'='*60}\n")
 
             self.is_running = True
+            section_num = 0
+            queued_time = 0.0  # How much music time we've queued
+            playback_start_time = None  # Wall-clock time when playback started
 
             # Give FluidSynth a moment to be ready
             time.sleep(0.5)
@@ -216,6 +192,7 @@ class RealtimeJazzGenerator:
             self.playback_thread = threading.Thread(target=self._playback_worker)
             self.playback_thread.daemon = True
             self.playback_thread.start()
+            playback_start_time = time.time()
 
             # Continue generating and queueing sections while playing
             while self.is_running:
@@ -223,7 +200,28 @@ class RealtimeJazzGenerator:
                 if num_sections is not None and section_num >= num_sections:
                     break
 
-                # Get next section (this will block until generation is ready)
+                # Calculate how far ahead we are (in seconds)
+                wall_clock_elapsed = time.time() - playback_start_time
+                ahead_by = queued_time - wall_clock_elapsed
+
+                # Maintain buffer: only queue more if we're less than buffer_size sections ahead
+                max_ahead = self.generator.buffer_size * self._calculate_section_duration_from_steps(
+                    config.get_total_steps()
+                )
+
+                if ahead_by >= max_ahead:
+                    if self.verbose:
+                        print(f"Queued {ahead_by:.1f}s ahead (max {max_ahead:.1f}s), waiting...")
+                    time.sleep(0.5)
+                    continue
+
+                # Wait if buffer is empty (let background generation catch up)
+                while len(self.generator.buffer) == 0:
+                    if self.verbose:
+                        print(f"Buffer empty, waiting for generation...")
+                    time.sleep(0.1)  # Check every 100ms
+
+                # Get next section from buffer
                 print(f"\n--- Section {section_num + 1} ---")
                 should_continue = (
                     num_sections is None or (section_num + 1) < num_sections
@@ -235,14 +233,14 @@ class RealtimeJazzGenerator:
 
                 # Add MIDI messages to queue and get actual duration
                 print(f"Queueing section {section_num + 1} for playback...")
-                actual_duration, msg_count = self._add_section_to_queue(tracks, current_time)
+                actual_duration, msg_count = self._add_section_to_queue(tracks, queued_time)
                 if self.verbose:
                     print(f"  Added {msg_count} MIDI messages (duration {actual_duration:.2f}s)")
                 else:
                     print(f"  Section duration {actual_duration:.2f}s")
 
                 # Advance time for next section (use actual MIDI duration)
-                current_time += actual_duration
+                queued_time += actual_duration
                 section_num += 1
 
             # Signal end of playback
