@@ -26,7 +26,7 @@ class RealtimeJazzGenerator:
         save_output: bool = False,
         output_dir: str = "output",
         verbose: bool = False,
-        context_steps: int = 4
+        context_steps: int = 32
     ):
         self.llm = llm
         self.audio_backend = audio_backend

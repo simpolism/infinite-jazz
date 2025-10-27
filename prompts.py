@@ -1,5 +1,6 @@
 """Prompt builders for Infinite Jazz batched quartet generation."""
 
+import random
 from dataclasses import dataclass, field
 from itertools import cycle
 from typing import Iterable, List
@@ -7,60 +8,9 @@ from typing import Iterable, List
 from config import RuntimeConfig
 
 
-@dataclass
-class PromptBuilder:
-    """Build prompts for quartet generation with rotating stylistic guidance."""
-
-    config: RuntimeConfig
-    primary_style: str = "modern swing"
-    style_palette: Iterable[str] = (
-        "modern swing",
-        "modal post-bop exploration",
-        "uptempo bebop chase",
-        "late-night ballad phrasing",
-    )
-    _style_cycle: cycle = field(init=False, repr=False)
-
-    def __post_init__(self):
-        palette: List[str] = list(self.style_palette) or [self.primary_style]
-        if self.primary_style not in palette:
-            palette.insert(0, self.primary_style)
-        self._style_cycle = cycle(palette)
-
-    def _active_style(self) -> str:
-        return next(self._style_cycle)
-
-    def build_quartet_prompt(self, previous_context: str = "") -> str:
-        """
-        Construct the prompt for generating all instruments in one pass.
-
-        Args:
-            previous_context: Optional tracker text from the prior section.
-
-        Returns:
-            Formatted prompt string.
-        """
-        steps = self.config.total_steps
-        bars = self.config.bars_per_generation
-        style = self._active_style()
-
-        prompt = [
-            f"You are a {style} jazz quartet generating {bars} bars of music.",
-            "Output all 4 instruments in tracker format exactly as specified.",
-            "",
-            "FORMAT RULES:",
-            f"- {steps} numbered lines per instrument (one line = one 16th-note step)",
-            '- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80"), NUMBER . (rest), or NUMBER ^ (tie)',
-            '- Chords: NUMBER NOTE:VELOCITY,NOTE:VELOCITY (e.g., "1 C3:65,E3:62,G3:60")',
-            "- Velocity range: 0-127 (60-90 typical for jazz)",
-            "",
-            "INSTRUMENT ROLES:",
-            "BASS – Walking foundation (E1–G2). Outline harmony but feel free to slip in approach tones.",
-            "DRUMS – Swing pulse using GM mapping (kick/snare/cymbals) yet break the ride pattern when inspiration hits.",
-            "PIANO – Mid-range comping (C3–C5) with open voicings; leave pockets of silence or punchy stabs at will.",
-            "SAX – Monophonic lead (A3–F5). Think in gestures rather than patterns—rests, flurries, and ties are all welcome.",
-            "SAX: Approach this chorus like a fearless improviser—chase tension, embrace wide intervals, and resolve phrases in surprising ways while keeping the tracker format clean.",
-            "",
+def _default_examples() -> List[List[str]]:
+    return [
+        [
             "FORMAT EXAMPLE A (Walking swing):",
             "BASS",
             "1 C2:80",
@@ -133,7 +83,8 @@ class PromptBuilder:
             "14 ^",
             "15 .",
             "16 .",
-            "",
+        ],
+        [
             "FORMAT EXAMPLE B (Modal variation):",
             "BASS",
             "1 D2:78",
@@ -188,12 +139,152 @@ class PromptBuilder:
             "14 A4:77",
             "15 .",
             "16 .",
+        ],
+        [
+            "FORMAT EXAMPLE C (Broken-time):",
+            "BASS",
+            "1 G1:76",
+            "2 .",
+            "3 .",
+            "4 D2:82",
+            "5 .",
+            "6 F#1:74",
+            "7 .",
+            "8 .",
+            "9 C2:80",
+            "10 .",
+            "11 Eb2:78",
+            "12 .",
+            "13 .",
+            "14 F2:77",
+            "15 .",
+            "16 Db2:73",
+            "",
+            "DRUMS",
+            "1 C2:88",
+            "2 .",
+            "3 .",
+            "4 F#2:54",
+            "5 D#3:63",
+            "6 .",
+            "7 C2:85",
+            "8 .",
+            "9 .",
+            "10 D#3:58",
+            "11 F#2:50",
+            "12 .",
+            "13 C2:87",
+            "14 .",
+            "15 D#3:62",
+            "16 F#2:52",
+            "",
+            "PIANO",
+            "1 .",
+            "2 Bb2:60,E3:63,G3:59",
+            "3 .",
+            "4 .",
+            "5 D3:66,F3:61,A3:64",
+            "6 .",
+            "7 .",
+            "8 G2:58,B3:60,D4:63",
+            "9 .",
+            "10 .",
+            "11 Eb3:65,G3:62,C4:66",
+            "12 .",
+            "13 .",
+            "14 F3:68,A3:64,C4:61",
+            "15 .",
+            "16 .",
+            "",
+            "SAX",
+            "1 .",
+            "2 G4:84",
+            "3 Bb4:86",
+            "4 .",
+            "5 F5:90",
+            "6 .",
+            "7 E5:88",
+            "8 C5:80",
+            "9 .",
+            "10 A4:76",
+            "11 ^",
+            "12 .",
+            "13 D5:89",
+            "14 C#5:87",
+            "15 .",
+            "16 G4:78",
+        ],
+    ]
+
+
+@dataclass
+class PromptBuilder:
+    """Build prompts for quartet generation with rotating stylistic guidance."""
+
+    config: RuntimeConfig
+    primary_style: str = "modern swing"
+    style_palette: Iterable[str] = (
+        "modern swing",
+        "modal post-bop exploration",
+        "uptempo bebop chase",
+        "late-night ballad phrasing",
+    )
+    examples_per_prompt: int = 2
+    example_catalog: List[List[str]] = field(default_factory=_default_examples)
+    _style_cycle: cycle = field(init=False, repr=False)
+
+    def __post_init__(self):
+        palette: List[str] = list(self.style_palette) or [self.primary_style]
+        if self.primary_style not in palette:
+            palette.insert(0, self.primary_style)
+        self._style_cycle = cycle(palette)
+
+    def _active_style(self) -> str:
+        return next(self._style_cycle)
+
+    def build_quartet_prompt(self, previous_context: str = "") -> str:
+        """Construct the prompt for generating all instruments in one pass."""
+        steps = self.config.total_steps
+        bars = self.config.bars_per_generation
+        style = self._active_style()
+
+        prompt = [
+            f"You are a {style} jazz quartet generating {bars} bars of music.",
+            "Output all 4 instruments in tracker format exactly as specified.",
+            "",
+            "FORMAT RULES:",
+            f"- {steps} numbered lines per instrument (one line = one 16th-note step)",
+            '- Each line: NUMBER NOTE:VELOCITY (e.g., "1 C2:80"), NUMBER . (rest), or NUMBER ^ (tie)',
+            '- Chords: NUMBER NOTE:VELOCITY,NOTE:VELOCITY (e.g., "1 C3:65,E3:62,G3:60")',
+            "- Velocity range: 0-127 (60-90 typical for jazz)",
+            "",
+            "INSTRUMENT ROLES:",
+            "BASS – Walking foundation (E1–G2). Outline harmony but feel free to slip in approach tones.",
+            "DRUMS – Swing pulse using GM mapping (kick/snare/cymbals) yet break the ride pattern when inspiration hits.",
+            "PIANO – Mid-range comping (C3–C5) with open voicings; leave pockets of silence or punchy stabs at will.",
+            "SAX – Monophonic lead (A3–F5). Think in gestures rather than patterns—rests, flurries, and ties are all welcome.",
+            "SAX: Vary your rhythmic motifs; if you play a figure twice, twist or displace it on the next pass.",
+            "SAX: Approach this chorus like a fearless improviser—chase tension, embrace wide intervals, and resolve phrases in surprising ways while keeping the tracker format clean.",
+        ]
+
+        selected_examples = random.sample(
+            self.example_catalog,
+            k=min(self.examples_per_prompt, len(self.example_catalog))
+        )
+
+        for example in selected_examples:
+            prompt.append("")
+            prompt.extend(example)
+
+        prompt.extend([
+            "",
+            "EXAMPLE USAGE NOTE: These illustrations are for format only—your rhythms and note choices must differ significantly from them.",
             "",
             "GUIDELINES:",
             "- Let each chorus mutate; avoid recycling the previous cadence.",
             "- Rests and unexpected accents are encouraged—rhythmic surprises keep the quartet alive.",
             "- Stay in range and obey the tracker format, everything else is yours to reinvent.",
-        ]
+        ])
 
         if previous_context:
             prompt.extend([

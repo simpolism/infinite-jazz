@@ -101,8 +101,8 @@ Examples:
     parser.add_argument(
         '--context-steps',
         type=int,
-        default=4,
-        help='Number of tracker steps per instrument to include from the previous section (default: 4)'
+        default=32,
+        help='Number of tracker steps per instrument to include from the previous section (default: 32)'
     )
     return parser
 

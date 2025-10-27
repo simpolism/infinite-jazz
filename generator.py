@@ -19,7 +19,7 @@ class GenerationPipeline:
         llm: LLMInterface,
         runtime_config: RuntimeConfig,
         verbose: bool = False,
-        context_steps: int = 4
+        context_steps: int = 32
     ):
         """
         Initialize generation pipeline
@@ -87,9 +87,9 @@ class GenerationPipeline:
         # Reasoning models need MUCH more tokens (they use tokens for internal reasoning)
         gen_config = {
             'max_tokens': 3200,  # Leave headroom for richer phrasing
-            'temperature': 0.92,
-            'top_p': 0.97,
-            'repeat_penalty': 1.05,
+            'temperature': 1.05,
+            'top_p': 0.99,
+            'repeat_penalty': 1.0,
         }
 
         result = self.llm.generate(prompt, **gen_config)

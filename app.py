@@ -32,7 +32,7 @@ class RunOptions:
     save_output: bool = False
     output_dir: str = "output"
     verbose: bool = False
-    context_steps: int = 4
+    context_steps: int = 32
 
 
 class InfiniteJazzApp:

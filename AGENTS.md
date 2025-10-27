@@ -18,7 +18,7 @@
 - Preserve existing docstrings and type hints; new public functions should include succinct docstrings explaining musical assumptions.
 - Maintain tracker constants (`BASS`, `DRUMS`, `PIANO`, `SAX`) and bar counts defined in `config.py` to stay compatible with live playback.
 - Keep `PromptBuilder.style_palette` curated; rotating styles are a cheap lever for variety while remaining easy to override in experiments.
-- Adjust continuity with the CLI flag `--context-steps`; higher values feed more tracker lines back into the prompt, while 0 starts each section clean.
+- Adjust continuity with the CLI flag `--context-steps` (default 32); higher values feed more tracker lines back into the prompt, while 0 starts each section clean.
 
 ## Testing Guidelines
 - There is no automated suite; validate changes by running `.venv/bin/python realtime_jazz.py --save-output --output-dir output/dev` and confirming tracker/MIDI continuity.

@@ -127,10 +127,10 @@ cfg.total_steps                      # Derived 16th-note steps per section
 ## Tuning Creativity
 
 - Prompt styles rotate each cycle (`modern swing`, `modal post-bop`, `uptempo bebop`, `late-night ballad`). Edit `PromptBuilder.style_palette` in `prompts.py` to curate or fix a vibe.
-- Generation temperature/top-p defaults are set to 0.92 / 0.97. Drop them in `generator.GenerationPipeline._generate_batched` for tighter adherence, raise them for wilder phrases.
+- Generation temperature/top-p defaults are set to 1.05 / 0.99. Drop them in `generator.GenerationPipeline._generate_batched` for tighter adherence, raise them for wilder phrases.
 - Inject custom instructions by subclassing `PromptBuilder` or swapping it in `GenerationPipeline` (e.g., derivative of `PromptBuilder` that emphasises polyrhythms or Latin grooves).
 - Still want more surprise? Feed a short corpus of tracker snippets into `previous_context` to prime different harmonic territory before realtime playback.
-- Control how much history the model references with `--context-steps` (default 4). Higher values increase continuity; lower values encourage fresh jumps.
+- Control how much history the model references with `--context-steps` (default 32). Higher values increase continuity; lower values encourage fresh jumps.
 
 ---
 
