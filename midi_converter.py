@@ -98,121 +98,117 @@ class MIDIConverter:
             program = self._get_program(instrument_name)
             track.append(mido.Message('program_change', program=program, channel=channel, time=0))
 
-        # Track active notes (for both trigger and sustain modes)
-        active_notes = {}  # pitch -> (velocity, start_time)
+        # Track active notes (dict in trigger mode, set in sustain mode)
+        active_notes = {} if self.config.note_mode == 'trigger' else set()
 
-        # Convert each step
-        current_time = 0  # Absolute time position in ticks
+        last_event_time = 0  # Absolute tick position of the last emitted MIDI event
 
         for step_idx, step in enumerate(track_data.steps):
             step_start_time = self._calculate_swing_time(step_idx)
+            delta = max(0, step_start_time - last_event_time)
 
             if self.config.note_mode == 'trigger':
-                # Trigger mode with tie support: notes hold across ties (^)
-
                 if step.is_tie:
-                    # Tie: continue previous notes, don't emit any events
-                    # Just advance time
+                    # Continue sustaining existing notes; nothing to emit
                     pass
-
                 elif not step.is_rest:
-                    # New note(s): turn off any active notes first, then start new ones
-
-                    # Turn off active notes
+                    # Turn off previous notes before starting new ones
                     if active_notes:
-                        time_offset = max(0, step_start_time - current_time)
-                        first_delta = True
                         for note_pitch in list(active_notes.keys()):
-                            delta_time = time_offset if first_delta else 0
                             track.append(mido.Message(
                                 'note_off',
                                 note=note_pitch,
                                 velocity=0,
                                 channel=channel,
-                                time=delta_time
+                                time=delta
                             ))
-                            first_delta = False
+                            delta = 0
+                            last_event_time = step_start_time
                         active_notes.clear()
-                        current_time = step_start_time
 
-                    # Start new notes
-                    for note_idx, note in enumerate(step.notes):
-                        delta_time = step_start_time - current_time if note_idx == 0 else 0
+                    for note in step.notes:
                         track.append(mido.Message(
                             'note_on',
                             note=note.pitch,
                             velocity=note.velocity,
                             channel=channel,
-                            time=delta_time
+                            time=delta
                         ))
-                        if note_idx == 0:
-                            current_time = step_start_time
-                        active_notes[note.pitch] = (note.velocity, step_start_time)
-
+                        delta = 0
+                        last_event_time = step_start_time
+                        active_notes[note.pitch] = step_start_time
                 else:
                     # Rest: turn off any active notes
                     if active_notes:
-                        time_offset = max(0, step_start_time - current_time)
-                        first_delta = True
                         for note_pitch in list(active_notes.keys()):
-                            delta_time = time_offset if first_delta else 0
                             track.append(mido.Message(
                                 'note_off',
                                 note=note_pitch,
                                 velocity=0,
                                 channel=channel,
-                                time=delta_time
+                                time=delta
                             ))
-                            first_delta = False
+                            delta = 0
+                            last_event_time = step_start_time
                         active_notes.clear()
-                        current_time = step_start_time
+            else:  # sustain mode
+                if step.is_tie:
+                    # Keep holding notes across ties
+                    pass
+                else:
+                    if active_notes:
+                        for note_pitch in list(active_notes):
+                            track.append(mido.Message(
+                                'note_off',
+                                note=note_pitch,
+                                velocity=0,
+                                channel=channel,
+                                time=delta
+                            ))
+                            delta = 0
+                            last_event_time = step_start_time
+                        active_notes.clear()
 
-            elif self.config.note_mode == 'sustain':
-                # Sustain mode: notes hold until next event
-                time_offset = max(0, step_start_time - current_time)
-                first_delta = True
+                    if not step.is_rest:
+                        for note in step.notes:
+                            track.append(mido.Message(
+                                'note_on',
+                                note=note.pitch,
+                                velocity=note.velocity,
+                                channel=channel,
+                                time=delta
+                            ))
+                            delta = 0
+                            last_event_time = step_start_time
+                            active_notes.add(note.pitch)
 
-                if active_notes:
-                    for note_pitch in list(active_notes):
-                        delta_time = time_offset if first_delta else 0
-                        track.append(mido.Message(
-                            'note_off',
-                            note=note_pitch,
-                            velocity=0,
-                            channel=channel,
-                            time=delta_time
-                        ))
-                        first_delta = False
-                    active_notes.clear()
+        total_steps = len(track_data.steps)
+        final_time = self._calculate_swing_time(total_steps)
 
-                if not step.is_rest:
-                    for note_idx, note in enumerate(step.notes):
-                        delta_time = time_offset if first_delta and note_idx == 0 else 0
-                        track.append(mido.Message(
-                            'note_on',
-                            note=note.pitch,
-                            velocity=note.velocity,
-                            channel=channel,
-                            time=delta_time
-                        ))
-                        first_delta = False
-                        active_notes.add(note.pitch)
+        # Close out any sustaining notes at the final step boundary
+        if self.config.note_mode == 'trigger':
+            remaining_notes = list(active_notes.keys())
+        else:
+            remaining_notes = list(active_notes)
 
-                if not first_delta:
-                    current_time = step_start_time
-
-        # Turn off any remaining active notes
-        for note_pitch in active_notes:
+        delta = max(0, final_time - last_event_time)
+        for idx, note_pitch in enumerate(remaining_notes):
             track.append(mido.Message(
                 'note_off',
                 note=note_pitch,
                 velocity=0,
                 channel=channel,
-                time=self.ticks_per_step
+                time=delta if idx == 0 else 0
             ))
+            delta = 0
+        if remaining_notes:
+            last_event_time = final_time
 
-        # End of track
-        track.append(mido.MetaMessage('end_of_track', time=0))
+        active_notes.clear()
+
+        # Ensure the track duration matches the tracker timeline
+        end_padding = max(0, final_time - last_event_time)
+        track.append(mido.MetaMessage('end_of_track', time=end_padding))
 
         return track
 
