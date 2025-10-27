@@ -7,6 +7,7 @@ import time
 
 from llm_interface import LLMInterface
 from generator import ContinuousGenerator, save_generated_section, concatenate_sections
+from prompts import PromptBuilder
 from midi_converter import MIDIConverter
 from config import RuntimeConfig
 from tracker_parser import InstrumentTrack
@@ -27,7 +28,9 @@ class RealtimeJazzGenerator:
         output_dir: str = "output",
         verbose: bool = False,
         context_steps: int = 32,
-        extra_prompt: str = ""
+        extra_prompt: str = "",
+        prompt_style: str = "default",
+        prompt_builder_factory=None
     ):
         self.llm = llm
         self.audio_backend = audio_backend
@@ -38,6 +41,7 @@ class RealtimeJazzGenerator:
         self.player = RealtimePlayer(audio_backend)
         self.context_steps = context_steps
         self.extra_prompt = extra_prompt
+        self.prompt_style = prompt_style
 
         self.run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -45,12 +49,15 @@ class RealtimeJazzGenerator:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving outputs to {self.output_dir}")
 
+        prompt_builder_factory = prompt_builder_factory or PromptBuilder
+
         self.generator = ContinuousGenerator(
             llm,
             runtime_config,
             verbose=verbose,
             context_steps=context_steps,
-            extra_prompt=extra_prompt
+            extra_prompt=extra_prompt,
+            prompt_builder_factory=prompt_builder_factory
         )
         self.prefill_delay = 0.5
         self.midi_converter = MIDIConverter(runtime_config)
@@ -196,4 +203,6 @@ class RealtimeJazzGenerator:
         }
         if self.extra_prompt:
             meta["prompt"] = self.extra_prompt
+        if self.prompt_style:
+            meta["prompt_style"] = self.prompt_style
         return meta

@@ -1,6 +1,6 @@
 """Generation pipeline for real-time jazz quartet."""
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 import re
 import time
 
@@ -21,7 +21,9 @@ class GenerationPipeline:
         runtime_config: RuntimeConfig,
         verbose: bool = False,
         context_steps: int = 32,
-        extra_prompt: str = ""
+        extra_prompt: str = "",
+        prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder,
+        max_retries: int = 3
     ):
         """
         Initialize generation pipeline
@@ -36,11 +38,12 @@ class GenerationPipeline:
         self.history = []  # Track previous sections for continuity
         self.verbose = verbose
         self.config = runtime_config
-        self.prompt_builder = PromptBuilder(runtime_config)
+        self.prompt_builder = prompt_builder_factory(runtime_config)
         self.extra_prompt = extra_prompt.strip()
         self.context_steps = max(0, context_steps)
         steps_per_section = self.config.total_steps or 1
         self.history_limit = max(3, (self.context_steps // steps_per_section) + 2)
+        self.max_retries = max(1, max_retries)
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -59,18 +62,39 @@ class GenerationPipeline:
                 print("(Building on previous section)")
             print(f"{'='*60}\n")
 
-        generated_text = self._generate_batched(previous_context)
+        last_error = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                generated_text = self._generate_batched(previous_context)
 
-        # Parse all parts together
-        full_tracker = self._assemble_tracker(generated_text)
-        tracks = parse_tracker(full_tracker)
+                # Parse all parts together
+                full_tracker = self._assemble_tracker(generated_text)
+                tracks = parse_tracker(full_tracker)
 
-        # Update history
-        self.history.append(generated_text)
-        if len(self.history) > self.history_limit:
-            self.history.pop(0)
+                expected_steps = self.config.total_steps
+                invalid_instruments = []
+                for instrument in self.GENERATION_ORDER:
+                    track = tracks.get(instrument)
+                    if not track or len(track.steps) != expected_steps:
+                        invalid_instruments.append(instrument)
 
-        return tracks
+                if invalid_instruments:
+                    raise ValueError(
+                        f"Incomplete tracker data for: {', '.join(invalid_instruments)}"
+                    )
+
+                # Update history
+                self.history.append(generated_text)
+                if len(self.history) > self.history_limit:
+                    self.history.pop(0)
+
+                return tracks
+            except Exception as exc:
+                last_error = exc
+                print(f"Generation attempt {attempt} failed: {exc}")
+                time.sleep(0.5)
+
+        raise RuntimeError(f"Failed to generate a valid section after {self.max_retries} attempts") from last_error
 
     def _generate_batched(self, previous_context: str = "") -> Dict[str, str]:
         """
@@ -317,7 +341,8 @@ class ContinuousGenerator:
         buffer_size: int = 4,
         verbose: bool = False,
         context_steps: int = 32,
-        extra_prompt: str = ""
+        extra_prompt: str = "",
+        prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder
     ):
         """
         Initialize continuous generator
@@ -336,12 +361,14 @@ class ContinuousGenerator:
             runtime_config,
             verbose=verbose,
             context_steps=context_steps,
-            extra_prompt=extra_prompt
+            extra_prompt=extra_prompt,
+            prompt_builder_factory=prompt_builder_factory
         )
         self.buffer_size = buffer_size
         self.buffer = []
         self.generation_lock = threading.Lock()
         self.generation_thread = None
+        self.last_generation_error = None
         self.verbose = verbose
 
     def prefill_buffer(self, count: Optional[int] = None):
@@ -371,6 +398,9 @@ class ContinuousGenerator:
             Dict mapping instrument to InstrumentTrack
         """
         if not self.buffer:
+            if self.last_generation_error:
+                raise RuntimeError("Background generation failed") from self.last_generation_error
+
             # Buffer empty, generate immediately (not ideal)
             print("Warning: Buffer empty! Generating immediately...")
             context = self.pipeline.get_previous_context()
@@ -396,9 +426,15 @@ class ContinuousGenerator:
 
         def generate():
             context = self.pipeline.get_previous_context()
-            new_section = self.pipeline.generate_section(context)
-            with self.generation_lock:
-                self.buffer.append(new_section)
+            try:
+                new_section = self.pipeline.generate_section(context)
+                with self.generation_lock:
+                    self.buffer.append(new_section)
+                self.last_generation_error = None
+            except Exception as exc:
+                self.last_generation_error = exc
+                if self.verbose:
+                    print(f"Background generation error: {exc}")
 
         self.generation_thread = threading.Thread(target=generate)
         self.generation_thread.daemon = True

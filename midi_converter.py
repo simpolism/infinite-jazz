@@ -265,7 +265,8 @@ class MIDIConverter:
         self,
         tracks: Dict[str, InstrumentTrack],
         start_step: int = 0,
-        num_steps: int = None
+        num_steps: int = None,
+        include_note_off_at_end: bool = True
     ) -> List[tuple]:
         """
         Generate real-time MIDI messages for playback
@@ -348,8 +349,26 @@ class MIDIConverter:
                         mido.Message('note_off', note=note_pitch, velocity=0, channel=channel)
                     ))
 
+        # Optionally schedule final note off to flush tail
+        if include_note_off_at_end:
+            final_time = 0.0
+            for instrument_steps in tracks.values():
+                final_time = max(final_time, len(instrument_steps.steps))
+            if final_time > 0:
+                beats_per_second = self.tempo / 60.0
+                steps_per_beat = 4
+                time_per_step = 1.0 / (beats_per_second * steps_per_beat)
+                tail_time = self._calculate_swing_time_seconds(int(final_time), time_per_step)
+                for instrument_name, track_data in tracks.items():
+                    channel = self.config.channels.get(instrument_name, 0)
+                    # CC 123 is the General MIDI "All Notes Off" controller
+                    messages.append((
+                        tail_time,
+                        mido.Message('control_change', control=123, value=0, channel=channel)
+                    ))
+
         # Sort by time
-        messages.sort(key=lambda x: x[0])
+        messages.sort(key=lambda x: (x[0], getattr(x[1], 'type', '')))
         return messages
 
 

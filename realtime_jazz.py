@@ -108,6 +108,12 @@ Examples:
         '--prompt',
         help='Optional creative direction appended to the base prompt (e.g., "bouncy, upbeat")'
     )
+    parser.add_argument(
+        '--prompt-style',
+        choices=['default', 'experimental'],
+        default='default',
+        help='Prompt preset to use (default or experimental)'
+    )
     return parser
 
 
@@ -144,6 +150,7 @@ def main(argv: Optional[list[str]] = None):
         verbose=args.verbose,
         context_steps=max(0, args.context_steps),
         prompt=args.prompt.strip() if args.prompt else None,
+        prompt_style=args.prompt_style,
     )
 
     app = InfiniteJazzApp(

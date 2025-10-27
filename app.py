@@ -9,6 +9,8 @@ from audio_output import FluidSynthBackend, HardwareMIDIBackend, VirtualMIDIBack
 from config import RuntimeConfig
 from llm_interface import LLMInterface
 from runtime import RealtimeJazzGenerator
+from prompts import PromptBuilder as DefaultPromptBuilder
+from experimental_prompt import PromptBuilder as ExperimentalPromptBuilder
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class RunOptions:
     verbose: bool = False
     context_steps: int = 32
     prompt: Optional[str] = None
+    prompt_style: str = "default"
 
 
 class InfiniteJazzApp:
@@ -122,6 +125,10 @@ class InfiniteJazzApp:
             print("  3. Switch to --backend virtual to expose a virtual port.")
             raise
 
+        prompt_builder_factory = DefaultPromptBuilder
+        if self.run_options.prompt_style == "experimental":
+            prompt_builder_factory = ExperimentalPromptBuilder
+
         generator = RealtimeJazzGenerator(
             llm=llm,
             audio_backend=audio_backend,
@@ -131,6 +138,8 @@ class InfiniteJazzApp:
             verbose=self.run_options.verbose,
             context_steps=self.run_options.context_steps,
             extra_prompt=self.run_options.prompt or "",
+            prompt_style=self.run_options.prompt_style,
+            prompt_builder_factory=prompt_builder_factory,
         )
 
         generator.run(num_sections=self.run_options.num_sections)

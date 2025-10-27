@@ -132,6 +132,7 @@ cfg.total_steps                      # Derived 16th-note steps per section
 - Still want more surprise? Feed a short corpus of tracker snippets into `previous_context` to prime different harmonic territory before realtime playback.
 - Control how much history the model references with `--context-steps` (default 32). Higher values increase continuity; lower values encourage fresh jumps.
 - Add custom vibe text with `--prompt "bouncy, upbeat"` (or any phrase) to inject extra guidance on top of the base prompt.
+- Switch prompts with `--prompt-style experimental` for the exploratory/chaotic preset (default is tighter swing).
 - Saved tracker `.txt` files start with comment metadata (lines prefixed with `#`) so you can recover tempo/config later; parsers ignore these automatically.
 
 ---

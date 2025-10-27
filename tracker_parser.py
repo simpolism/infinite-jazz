@@ -122,7 +122,14 @@ class TrackerParser:
                 raise ValueError(f"No valid velocity found in: {velocity_str}")
 
             # Convert pitch name to MIDI number
-            pitch = TrackerParser.note_to_midi(pitch_str.strip())
+            try:
+                pitch = TrackerParser.note_to_midi(pitch_str.strip())
+            except ValueError as exc:
+                message = str(exc)
+                if "out of MIDI range" in message:
+                    print(f"  Warning: {message}. Skipping note.")
+                    continue
+                raise
             velocity = int(velocity_digits)
 
             # Clamp velocity to valid MIDI range (0-127) instead of failing

@@ -20,6 +20,7 @@
 - Keep `PromptBuilder.style_palette` curated; rotating styles are a cheap lever for variety while remaining easy to override in experiments.
 - Adjust continuity with the CLI flag `--context-steps` (default 32); higher values feed more tracker lines back into the prompt, while 0 starts each section clean.
 - Use `--prompt` to append collaborator notes (e.g., "bouncy, upbeat") without editing base prompts.
+- `--prompt-style experimental` swaps in the exploratory/chaotic prompt template; default stays the tighter swing preset.
 - Exported tracker `.txt` files begin with `# key: value` metadata so you can recover tempo/config; `tracker_parser` strips these automatically.
 
 ## Testing Guidelines
