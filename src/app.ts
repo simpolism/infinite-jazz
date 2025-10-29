@@ -6,9 +6,10 @@ import { cloneConfig, DEFAULT_CONFIG } from './config.js';
 import { TrackerContext } from './contextManager.js';
 import { PromptBuilder } from './promptBuilder.js';
 import { loadSettings, saveSettings, type StoredSettings } from './settings.js';
-import type { RuntimeConfig } from './types.js';
+import type { GenerationResult, InstrumentName, ParsedTracker, RuntimeConfig } from './types.js';
 
 const CONTEXT_STEPS = 32;
+const SECTION_BUFFER_TARGET = 4;
 
 function requireElement<T extends Element>(value: Element | null, message: string): T {
   if (!value) {
@@ -89,6 +90,50 @@ function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
   statusEl.dataset.status = isError ? 'error' : 'info';
   statusEl.style.color = isError ? '#ff9a9a' : '';
+}
+
+function mergeTrackerText(existing: string, newSection: string): string {
+  type InstrumentName = 'BASS' | 'DRUMS' | 'PIANO' | 'SAX';
+  const INSTRUMENTS: InstrumentName[] = ['BASS', 'DRUMS', 'PIANO', 'SAX'];
+
+  const stripLineNumber = (line: string): string => {
+    return line.replace(/^\s*\d+\.?\s+/, '').trim();
+  };
+
+  const parseByInstrument = (text: string): Record<InstrumentName, string[]> => {
+    const result: Record<InstrumentName, string[]> = { BASS: [], DRUMS: [], PIANO: [], SAX: [] };
+    let current: InstrumentName | null = null;
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if ((INSTRUMENTS as string[]).includes(trimmed)) {
+        current = trimmed as InstrumentName;
+        continue;
+      }
+      if (current) {
+        // Strip line numbers when collecting lines
+        result[current].push(stripLineNumber(trimmed));
+      }
+    }
+    return result;
+  };
+
+  const existingParts = parseByInstrument(existing);
+  const newParts = parseByInstrument(newSection);
+
+  const merged: string[] = [];
+  let globalLineNumber = 1;
+  for (const instrument of INSTRUMENTS) {
+    merged.push(instrument);
+    const combined = [...existingParts[instrument], ...newParts[instrument]];
+    for (const line of combined) {
+      merged.push(`${globalLineNumber}. ${line}`);
+      globalLineNumber++;
+    }
+    merged.push('');
+  }
+
+  return merged.join('\n').trim();
 }
 
 function refreshPlaybackToggleControl(): void {
@@ -494,59 +539,144 @@ async function runContinuousGeneration(options: {
   swingEnabled: boolean;
   swingRatio: number;
 }): Promise<void> {
+  type BufferedSection = GenerationResult;
+  const buffer: BufferedSection[] = [];
+  const BUFFER_TARGET = SECTION_BUFFER_TARGET;
   let sectionIndex = 0;
-  while (isRunning) {
-    setStatus(`Generating section ${sectionIndex + 1}…`);
-    const session = generator.streamSession({
-      apiKey: options.apiKey,
-      baseUrl: options.baseUrl,
-      model: options.model,
-      promptOverride: options.promptOverride,
-      previousContext: trackerContext.buildPromptChunk(),
-      barsPerGeneration: options.bars,
-      tempo: options.tempo,
-      swingEnabled: options.swingEnabled,
-      swingRatio: options.swingRatio,
-      onTrackerLine: ({ instrument, stepIndex, step }) => {
-        playback.enqueueStep(instrument, stepIndex, step);
-      },
-      onStatus: (message) => setStatus(message),
-    });
+  let inflight = false;
+  let generationError: Error | null = null;
+  let generationErrorMessage: string | null = null;
 
-    let result: Awaited<typeof session>;
+  const shouldReportStatus = (): boolean => buffer.length === 0 && sectionIndex === 0;
+
+  const generateSection = async (silent: boolean): Promise<void> => {
+    if (!isRunning || inflight) {
+      return;
+    }
+    inflight = true;
+    const contextPrompt = trackerContext.buildPromptChunk();
     try {
-      result = await session;
-    } catch (error) {
+      const result = await generator.streamSession({
+        apiKey: options.apiKey,
+        baseUrl: options.baseUrl,
+        model: options.model,
+        promptOverride: options.promptOverride,
+        previousContext: contextPrompt,
+        barsPerGeneration: options.bars,
+        tempo: options.tempo,
+        swingEnabled: options.swingEnabled,
+        swingRatio: options.swingRatio,
+        onStatus: silent ? undefined : (message) => setStatus(message),
+      });
+
       if (!isRunning) {
-        break;
+        return;
       }
-      throw error;
+      if (result?.aborted) {
+        setStatus('Generation aborted.');
+        isRunning = false;
+        return;
+      }
+      latestTrackerText = mergeTrackerText(latestTrackerText, result.trackerText);
+      trackerContext.incorporate(result.trackerText);
+      downloadButton.disabled = latestTrackerText.length === 0;
+      copyButton.disabled = latestTrackerText.length === 0;
+      buffer.push(result);
+    } catch (error) {
+      generationError = error as Error;
+      generationErrorMessage = generationError?.message ?? 'Generation failed.';
+      setStatus(generationErrorMessage, true);
+      isRunning = false;
+    } finally {
+      inflight = false;
+    }
+  };
+
+  const queueGeneration = () => {
+    if (!isRunning) return;
+    if (inflight) return;
+    if (buffer.length >= BUFFER_TARGET) return;
+    void generateSection(true).then(() => {
+      if (isRunning && !generationError && buffer.length < BUFFER_TARGET) {
+        queueGeneration();
+      }
+    });
+  };
+
+  const delay = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+  const scheduleSection = (section: BufferedSection) => {
+    const parsed: ParsedTracker = TrackerParser.parse(section.trackerText);
+    const instrumentOrder: InstrumentName[] = ['BASS', 'DRUMS', 'PIANO', 'SAX'];
+    for (const instrument of instrumentOrder) {
+      const track = parsed[instrument];
+      if (!track) continue;
+      const { steps } = track;
+      for (let idx = 0; idx < steps.length; idx += 1) {
+        playback.enqueueStep(instrument, idx, steps[idx]);
+      }
+    }
+  };
+
+  // Prefill buffer before starting playback
+  while (isRunning && buffer.length < BUFFER_TARGET && !generationError) {
+    const silent = !shouldReportStatus();
+    await generateSection(silent);
+  }
+
+  if (!isRunning) {
+    setStatus('Session aborted by user.');
+    return;
+  }
+  if (generationError) {
+    setStatus(generationErrorMessage ?? 'Generation failed.', true);
+    return;
+  }
+
+  queueGeneration();
+
+  while (isRunning) {
+    while (buffer.length === 0 && isRunning && !generationError) {
+      queueGeneration();
+      await delay(50);
     }
 
     if (!isRunning) {
       break;
     }
 
-    if (result?.aborted) {
-      setStatus('Generation aborted.');
+    if (generationError) {
       break;
     }
 
-    latestTrackerText = result.trackerText;
-    trackerContext.incorporate(result.trackerText);
-    downloadButton.disabled = latestTrackerText.length === 0;
-    copyButton.disabled = latestTrackerText.length === 0;
+    const sectionDuration = playback.getSectionDuration();
+    const targetLead = sectionDuration * SECTION_BUFFER_TARGET;
+    while (isRunning && !generationError && playback.getLeadSeconds() > targetLead) {
+      queueGeneration();
+      await delay(100);
+    }
+
+    const nextSection = buffer.shift();
+    if (!nextSection) {
+      await delay(50);
+      continue;
+    }
+
+    queueGeneration();
+
     sectionIndex += 1;
-    setStatus('Section complete – generating next…');
+    setStatus(`Playing section ${sectionIndex}…`);
+    scheduleSection(nextSection);
   }
 
   if (!isRunning) {
     setStatus('Session aborted by user.');
+  } else if (generationError) {
+    setStatus(generationErrorMessage ?? 'Generation failed.', true);
   } else {
     setStatus('Ready – playback finished.');
   }
 }
-
 form.addEventListener('submit', handleSubmit);
 stopButton.addEventListener('click', handleStop);
 playbackToggleButton.addEventListener('click', handlePlaybackToggle);

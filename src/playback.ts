@@ -8,17 +8,138 @@ type MidiVoiceRegistry = Record<InstrumentName, Set<number>>;
 
 type ScheduledNote = {
   pitch: number;
-  timerOn: number;
-  timerOff: number;
+  startTime: number;
+  endTime: number;
+  onEvent: ScheduledEvent | null;
+  offEvent: ScheduledEvent | null;
 };
 
-type ScheduledNoteRegistry = Record<MelodicInstrument, Map<string, ScheduledNote>>;
+type ScheduledNoteRegistry = Record<MelodicInstrument, Set<ScheduledNote>>;
 
+const EPSILON = 1e-4;
+const INITIAL_LOOKAHEAD = 0.4;
+const SECTION_LOOKAHEAD = 0.25;
+const INSTRUMENTS: InstrumentName[] = ['BASS', 'DRUMS', 'PIANO', 'SAX'];
+const SCHEDULER_GUARD = 0.025;
+const SECTION_BUFFER = 4;
+
+interface ScheduledEvent {
+  cancel(): void;
+}
+
+interface InternalScheduledEvent {
+  time: number;
+  priority: number;
+  id: number;
+  label?: string;
+  data?: Record<string, unknown>;
+  callback: () => void;
+  cancelled: boolean;
+}
+
+interface ScheduleOptions {
+  priority?: number;
+  label?: string;
+  data?: Record<string, unknown>;
+}
+
+class TimelineScheduler {
+  private events: InternalScheduledEvent[];
+  private timerId: number | null;
+  private counter: number;
+  private readonly getTime: () => number;
+
+  constructor(getTime: () => number) {
+    this.events = [];
+    this.timerId = null;
+    this.counter = 0;
+    this.getTime = getTime;
+  }
+
+  schedule(time: number, callback: () => void, options: ScheduleOptions = {}): ScheduledEvent {
+    const event: InternalScheduledEvent = {
+      time,
+      priority: options.priority ?? 0,
+      label: options.label,
+      data: options.data,
+      id: this.counter++,
+      callback,
+      cancelled: false,
+    };
+    this.events.push(event);
+    this.events.sort((a, b) => {
+      if (Math.abs(a.time - b.time) > EPSILON) {
+        return a.time - b.time;
+      }
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority;
+      }
+      return a.id - b.id;
+    });
+    if (this.events[0] === event) {
+      this.resetTimer();
+    }
+    return {
+      cancel: () => {
+        event.cancelled = true;
+        if (this.events[0] === event) {
+          this.resetTimer();
+        }
+      },
+    };
+  }
+
+  clear(): void {
+    if (this.timerId !== null) {
+      window.clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    this.events = [];
+  }
+
+  private resetTimer(): void {
+    if (this.timerId !== null) {
+      window.clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    while (this.events.length && this.events[0].cancelled) {
+      this.events.shift();
+    }
+    if (!this.events.length) {
+      return;
+    }
+    const head = this.events[0];
+    const now = this.getTime();
+    const guardAdjusted = head.time - now - SCHEDULER_GUARD;
+    const delayMs = Math.max(0, guardAdjusted * 1000);
+    this.timerId = window.setTimeout(() => this.flush(), delayMs);
+  }
+
+  private flush(): void {
+    this.timerId = null;
+    const now = this.getTime();
+    while (this.events.length) {
+      const event = this.events[0];
+      if (event.time - now > EPSILON) {
+        break;
+      }
+      this.events.shift();
+      if (!event.cancelled) {
+        event.callback();
+      }
+    }
+    if (this.events.length) {
+      this.resetTimer();
+    }
+  }
+}
 interface PlaybackBackend {
   prepare(config: RuntimeConfig): Promise<boolean> | boolean;
   enqueueStep(instrument: InstrumentName, stepIndex: number, step: TrackerStep): void;
   stopAll(): void;
   shutdown(): void;
+  getLeadSeconds(): number;
+  getSectionDuration(): number;
 }
 
 export type PlaybackBackendName = 'soundfont' | 'midi';
@@ -89,6 +210,14 @@ export class PlaybackEngine {
     this.activeBackend.enqueueStep(instrument, stepIndex, step);
   }
 
+  getLeadSeconds(): number {
+    return this.activeBackend.getLeadSeconds();
+  }
+
+  getSectionDuration(): number {
+    return this.activeBackend.getSectionDuration();
+  }
+
   stopAll(): void {
     this.midiBackend.stopAll();
     this.synthBackend.stopAll();
@@ -107,8 +236,13 @@ class SoundfontPlayback implements PlaybackBackend {
   private started: boolean;
   private startTime: number;
   private scheduled: ScheduledNoteRegistry;
-  private drumTimers: number[];
-  private noteCounter: number;
+  private scheduler: TimelineScheduler;
+  private sectionDuration: number;
+  private maxSectionStart: number;
+  private lastStepIndices: Record<InstrumentName, number>;
+  private instrumentSections: Record<InstrumentName, number>;
+  private sectionStartTimes: Map<number, number>;
+  private pendingSections: Map<number, Map<number, Partial<Record<InstrumentName, TrackerStep>>>>;
 
   constructor(baseConfig: RuntimeConfig) {
     this.config = cloneConfig(baseConfig);
@@ -117,15 +251,20 @@ class SoundfontPlayback implements PlaybackBackend {
     this.started = false;
     this.startTime = 0;
     this.scheduled = this.createScheduleRegistry();
-    this.drumTimers = [];
-    this.noteCounter = 0;
+    this.scheduler = new TimelineScheduler(() => this.context?.currentTime ?? performance.now() / 1000);
+    this.sectionDuration = 0;
+    this.maxSectionStart = 0;
+    this.lastStepIndices = { BASS: -1, DRUMS: -1, PIANO: -1, SAX: -1 };
+    this.instrumentSections = { BASS: 0, DRUMS: 0, PIANO: 0, SAX: 0 };
+    this.sectionStartTimes = new Map();
+    this.pendingSections = new Map();
   }
 
   private createScheduleRegistry(): ScheduledNoteRegistry {
     return {
-      BASS: new Map(),
-      PIANO: new Map(),
-      SAX: new Map(),
+      BASS: new Set(),
+      PIANO: new Set(),
+      SAX: new Set(),
     };
   }
 
@@ -133,7 +272,10 @@ class SoundfontPlayback implements PlaybackBackend {
     this.config = cloneConfig(config);
     this.cancelAllTimers();
     this.scheduled = this.createScheduleRegistry();
-    this.noteCounter = 0;
+    this.lastStepIndices = { BASS: -1, DRUMS: -1, PIANO: -1, SAX: -1 };
+    this.instrumentSections = { BASS: 0, DRUMS: 0, PIANO: 0, SAX: 0 };
+    this.sectionStartTimes = new Map();
+    this.pendingSections = new Map();
     if (!this.context) {
       const AudioContextCtor =
         window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -150,7 +292,19 @@ class SoundfontPlayback implements PlaybackBackend {
     }
     applyProgramMap(this.synth, this.config);
     this.started = false;
-    this.startTime = this.context.currentTime + 0.1;
+    const quarter = 60 / this.config.tempo;
+    const base = quarter / 4;
+    const pairDuration = base * 2;
+    const total = totalSteps(this.config);
+    this.sectionDuration = this.stepStartSeconds(total, quarter, base, pairDuration);
+    if (this.sectionDuration <= 0) {
+      this.sectionDuration = Math.max(base, total * base);
+    }
+    const bufferLead = this.sectionDuration * SECTION_BUFFER;
+    this.startTime = this.context.currentTime + bufferLead + INITIAL_LOOKAHEAD;
+    this.maxSectionStart = this.startTime;
+    // Initialize section 0's start time
+    this.sectionStartTimes.set(0, this.startTime);
     return true;
   }
 
@@ -158,30 +312,44 @@ class SoundfontPlayback implements PlaybackBackend {
     if (!this.context || !this.synth) {
       return;
     }
-    const start =
-      this.startTime +
-      this.stepStartSeconds(stepIndex, 60 / this.config.tempo, (60 / this.config.tempo) / 4, (60 / this.config.tempo) / 2);
-    if (!this.started) {
-      this.started = true;
+
+    const quarter = 60 / this.config.tempo;
+    const base = quarter / 4;
+    const pairDuration = base * 2;
+
+    // Detect section transition: if this instrument looped back to a lower step
+    const lastStep = this.lastStepIndices[instrument];
+    if (lastStep >= 0 && stepIndex < lastStep) {
+      // This instrument looped - increment its section counter
+      this.instrumentSections[instrument]++;
+
+      const newSection = this.instrumentSections[instrument];
+
+      // Check if we need to set the start time for this new section
+      if (!this.sectionStartTimes.has(newSection)) {
+        // First instrument to reach this section - compute its start time
+        const prevSectionStart = this.sectionStartTimes.get(newSection - 1) ?? this.startTime;
+        const idealStart = prevSectionStart + this.sectionDuration;
+        const now = this.getAudioTime();
+        const minLeadStart = now + SECTION_LOOKAHEAD;
+
+        // Use ideal time if we're on schedule, otherwise push forward slightly
+        const actualStart = Math.max(idealStart, minLeadStart);
+        this.sectionStartTimes.set(newSection, actualStart);
+        this.maxSectionStart = Math.max(this.maxSectionStart, actualStart);
+      }
     }
-    if (instrument === 'DRUMS') {
-      this.scheduleDrums(step, start);
-      return;
-    }
-    const melodicInstrument = instrument as MelodicInstrument;
-    this.stopInstrument(melodicInstrument);
-    if (step.isRest || step.isTie) {
-      return;
-    }
-    const duration = this.stepDurationSeconds(stepIndex);
-    for (const note of step.notes) {
-      this.scheduleNote(melodicInstrument, note.pitch, note.velocity, start, duration);
-    }
+    this.lastStepIndices[instrument] = stepIndex;
+
+    // Get the start time for this instrument's current section
+    const currentSection = this.instrumentSections[instrument];
+    this.bufferStep(currentSection, stepIndex, instrument, step);
   }
 
   stopAll(): void {
     this.cancelAllTimers();
     this.scheduled = this.createScheduleRegistry();
+    this.pendingSections = new Map();
     if (this.synth) {
       this.synth.allSoundsOff();
     }
@@ -200,63 +368,272 @@ class SoundfontPlayback implements PlaybackBackend {
   }
 
   private cancelAllTimers(): void {
-    for (const map of Object.values(this.scheduled)) {
-      for (const entry of map.values()) {
-        window.clearTimeout(entry.timerOn);
-        window.clearTimeout(entry.timerOff);
+    this.scheduler.clear();
+    for (const voices of Object.values(this.scheduled)) {
+      voices.clear();
+    }
+  }
+
+  private scheduleAt(time: number, callback: () => void, priority = 0): ScheduledEvent {
+    return this.scheduler.schedule(time, callback, { priority });
+  }
+
+  private getAudioTime(): number {
+    return this.context?.currentTime ?? performance.now() / 1000;
+  }
+
+  getLeadSeconds(): number {
+    const latestEnd = this.maxSectionStart + this.sectionDuration;
+    const lead = latestEnd - this.getAudioTime();
+    return lead > 0 ? lead : 0;
+  }
+
+  getSectionDuration(): number {
+    return this.sectionDuration;
+  }
+
+  private bufferStep(section: number, stepIndex: number, instrument: InstrumentName, step: TrackerStep): void {
+    let sectionSteps = this.pendingSections.get(section);
+    if (!sectionSteps) {
+      sectionSteps = new Map();
+      this.pendingSections.set(section, sectionSteps);
+    }
+    const existing = sectionSteps.get(stepIndex) ?? {};
+    existing[instrument] = step;
+    sectionSteps.set(stepIndex, existing);
+    if (INSTRUMENTS.every((name) => existing[name])) {
+      this.pendingSections.get(section)?.delete(stepIndex);
+      if ((this.pendingSections.get(section)?.size ?? 0) === 0) {
+        this.pendingSections.delete(section);
       }
-      map.clear();
+      this.scheduleCombinedStep(section, stepIndex, existing as Record<InstrumentName, TrackerStep>);
     }
-    for (const timer of this.drumTimers) {
-      window.clearTimeout(timer);
+  }
+
+  private scheduleCombinedStep(
+    section: number,
+    stepIndex: number,
+    steps: Record<InstrumentName, TrackerStep>
+  ): void {
+    const quarter = 60 / this.config.tempo;
+    const base = quarter / 4;
+    const pairDuration = base * 2;
+    let sectionStartTime = this.sectionStartTimes.get(section) ?? this.startTime;
+    const stepOffset = this.stepStartSeconds(stepIndex, quarter, base, pairDuration);
+    const now = this.getAudioTime();
+    let start = sectionStartTime + stepOffset;
+    const minimumStart = now + SECTION_LOOKAHEAD;
+    if (start < minimumStart) {
+      const shift = minimumStart - start;
+      sectionStartTime += shift;
+      this.sectionStartTimes.set(section, sectionStartTime);
+      this.maxSectionStart = Math.max(this.maxSectionStart, sectionStartTime);
+      start = sectionStartTime + stepOffset;
+      // shift future sections by same amount to preserve ordering
+      for (const key of Array.from(this.sectionStartTimes.keys())) {
+        if (key > section) {
+          const updated = this.sectionStartTimes.get(key);
+          if (updated !== undefined) {
+            this.sectionStartTimes.set(key, updated + shift);
+            this.maxSectionStart = Math.max(this.maxSectionStart, updated + shift);
+          }
+        }
+      }
     }
-    this.drumTimers = [];
+    if (!this.started) {
+      this.started = true;
+    }
+    for (const instrument of INSTRUMENTS) {
+      const step = steps[instrument];
+      if (instrument === 'DRUMS') {
+        this.scheduleDrums(step, start);
+        continue;
+      }
+      const melodicInstrument = instrument as MelodicInstrument;
+      if (step.isTie) {
+        const tieDuration = this.stepDurationSeconds(stepIndex);
+        this.extendInstrumentWithTie(melodicInstrument, start, start + tieDuration);
+        continue;
+      }
+      if (step.isRest) {
+        this.releaseInstrumentAt(melodicInstrument, start);
+        continue;
+      }
+      this.releaseInstrumentAt(melodicInstrument, start);
+      const duration = this.stepDurationSeconds(stepIndex);
+      for (const note of step.notes) {
+        this.scheduleNote(melodicInstrument, note.pitch, note.velocity, start, duration);
+      }
+    }
   }
 
   private scheduleNote(instrument: MelodicInstrument, pitch: number, velocity: number, startTime: number, duration: number): void {
-    if (!this.context || !this.synth) return;
+    const context = this.context;
+    const synth = this.synth;
+    if (!context || !synth) return;
     const channel = this.config.channels[instrument];
-    const now = this.context.currentTime;
-    const delayMs = Math.max(0, (startTime - now) * 1000);
-    const sustainMs = Math.max(50, duration * 1000);
+    const endTime = startTime + duration;
+    const voices = this.scheduled[instrument];
+    const note: ScheduledNote = {
+      pitch,
+      startTime,
+      endTime,
+      onEvent: null,
+      offEvent: null,
+    };
 
-    const onTimer = window.setTimeout(() => {
-      this.synth?.noteOn(channel, pitch, Math.max(1, Math.min(127, velocity)));
-    }, delayMs);
-    const offTimer = window.setTimeout(() => {
-      this.synth?.noteOff(channel, pitch);
-    }, delayMs + sustainMs);
+    voices.add(note);
 
-    const key = `${pitch}-${this.noteCounter++}`;
-    this.scheduled[instrument].set(key, { pitch, timerOn: onTimer, timerOff: offTimer });
+    note.onEvent = this.scheduler.schedule(
+      startTime,
+      () => {
+        synth.noteOn(channel, pitch, Math.max(1, Math.min(127, velocity)));
+        note.onEvent = null;
+      },
+      {
+        priority: 0,
+        label: 'noteOn',
+        data: { instrument, pitch, startTime: startTime.toFixed(3) },
+      }
+    );
+
+    note.offEvent = this.scheduler.schedule(
+      endTime,
+      () => {
+        synth.noteOff(channel, pitch);
+        note.offEvent = null;
+        voices.delete(note);
+      },
+      {
+        priority: 1,
+        label: 'noteOff',
+        data: { instrument, pitch, endTime: endTime.toFixed(3) },
+      }
+    );
+  }
+
+  private cancelEvent(event: ScheduledEvent | null): void {
+    event?.cancel();
+  }
+
+  private releaseInstrumentAt(instrument: MelodicInstrument, releaseTime: number): void {
+    const context = this.context;
+    const synth = this.synth;
+    if (!context || !synth) return;
+    const voices = this.scheduled[instrument];
+    if (voices.size === 0) return;
+    const channel = this.config.channels[instrument];
+    const now = this.getAudioTime();
+    for (const note of Array.from(voices)) {
+      const targetTime = Math.min(releaseTime, note.endTime);
+      if (targetTime <= note.startTime + EPSILON) {
+        this.cancelEvent(note.onEvent);
+        note.onEvent = null;
+        this.cancelEvent(note.offEvent);
+        note.offEvent = null;
+        synth.noteOff(channel, note.pitch);
+        voices.delete(note);
+        continue;
+      }
+      if (targetTime <= now + EPSILON) {
+        this.cancelEvent(note.offEvent);
+        note.offEvent = null;
+        synth.noteOff(channel, note.pitch);
+        voices.delete(note);
+        continue;
+      }
+      if (Math.abs(targetTime - note.endTime) <= EPSILON) {
+        continue;
+      }
+      this.cancelEvent(note.offEvent);
+      note.offEvent = null;
+      note.endTime = targetTime;
+      note.offEvent = this.scheduler.schedule(
+        targetTime,
+        () => {
+          synth.noteOff(channel, note.pitch);
+          note.offEvent = null;
+          voices.delete(note);
+        },
+        {
+          priority: -1,
+          label: 'noteRelease',
+          data: { instrument, pitch: note.pitch, targetTime: targetTime.toFixed(3) },
+        }
+      );
+    }
+  }
+
+  private extendInstrumentWithTie(instrument: MelodicInstrument, tieStart: number, newEndTime: number): void {
+    const context = this.context;
+    const synth = this.synth;
+    if (!context || !synth) return;
+    const voices = this.scheduled[instrument];
+    if (voices.size === 0) return;
+    const channel = this.config.channels[instrument];
+    const now = this.getAudioTime();
+    for (const note of Array.from(voices)) {
+      if (note.endTime + EPSILON < tieStart) {
+        continue;
+      }
+      if (newEndTime <= note.endTime + EPSILON) {
+        continue;
+      }
+      this.cancelEvent(note.offEvent);
+      note.offEvent = null;
+      note.endTime = newEndTime;
+      if (newEndTime <= now + EPSILON) {
+        synth.noteOff(channel, note.pitch);
+        voices.delete(note);
+        continue;
+      }
+      note.offEvent = this.scheduler.schedule(
+        newEndTime,
+        () => {
+          synth.noteOff(channel, note.pitch);
+          note.offEvent = null;
+          voices.delete(note);
+        },
+        {
+          priority: -1,
+          label: 'tieRelease',
+          data: { instrument, pitch: note.pitch, newEndTime: newEndTime.toFixed(3) },
+        }
+      );
+    }
   }
 
   private scheduleDrums(step: TrackerStep, startTime: number): void {
-    if (!this.context || !this.synth) return;
+    const context = this.context;
+    const synth = this.synth;
+    if (!context || !synth) return;
     if (step.isRest || step.isTie) return;
-    const now = this.context.currentTime;
-    const delayMs = Math.max(0, (startTime - now) * 1000);
     for (const note of step.notes) {
-      const onTimer = window.setTimeout(() => {
-        if (!this.synth) return;
-        this.synth.noteOn(DRUM_CHANNEL, note.pitch, Math.max(1, Math.min(127, note.velocity)));
-        const offTimer = window.setTimeout(() => {
-          this.synth?.noteOff(DRUM_CHANNEL, note.pitch);
-        }, 120);
-        this.drumTimers.push(offTimer);
-      }, delayMs);
-      this.drumTimers.push(onTimer);
+      this.scheduler.schedule(
+        startTime,
+        () => {
+          const velocity = Math.max(1, Math.min(127, note.velocity));
+          synth.noteOn(DRUM_CHANNEL, note.pitch, velocity);
+          const releaseTime = startTime + 0.12;
+          this.scheduler.schedule(
+            releaseTime,
+            () => {
+              synth.noteOff(DRUM_CHANNEL, note.pitch);
+            },
+            {
+              priority: 1,
+              label: 'drumOff',
+              data: { pitch: note.pitch, releaseTime: releaseTime.toFixed(3) },
+            }
+          );
+        },
+        {
+          priority: 0,
+          label: 'drumOn',
+          data: { pitch: note.pitch, startTime: startTime.toFixed(3) },
+        }
+      );
     }
-  }
-
-  private stopInstrument(instrument: MelodicInstrument): void {
-    const voices = this.scheduled[instrument];
-    for (const timers of Array.from(voices.values())) {
-      window.clearTimeout(timers.timerOn);
-      window.clearTimeout(timers.timerOff);
-      this.synth?.noteOff(this.config.channels[instrument], timers.pitch);
-    }
-    voices.clear();
   }
 
   private stepDurationSeconds(stepIndex: number): number {
@@ -268,17 +645,21 @@ class SoundfontPlayback implements PlaybackBackend {
     return Math.max(0.05, end - start);
   }
 
-  private stepStartSeconds(stepIndex: number, quarter: number, base: number, pairDuration: number): number {
-    if (stepIndex >= totalSteps(this.config)) {
-      return stepIndex * base;
+  private stepStartSeconds(stepIndex: number, _quarter: number, base: number, pairDuration: number): number {
+    if (stepIndex <= 0) {
+      return 0;
     }
     const pairIndex = Math.floor(stepIndex / 2);
     const pairStart = pairIndex * pairDuration;
     const isOffbeat = stepIndex % 2 === 1;
-    if (!this.config.swingEnabled || !isOffbeat) {
+    if (!isOffbeat) {
       return pairStart;
     }
-    return pairStart + pairDuration * this.config.swingRatio;
+    if (!this.config.swingEnabled) {
+      return pairStart + base;
+    }
+    const swingRatio = Math.min(Math.max(this.config.swingRatio, 0), 1);
+    return pairStart + pairDuration * swingRatio;
   }
 }
 
@@ -289,6 +670,8 @@ class WebMidiPlayback implements PlaybackBackend {
   private midiStartTimeMs: number;
   private midiVoices: MidiVoiceRegistry;
   private active: boolean;
+  private sectionDuration: number;
+  private latestSectionEndMs: number;
 
   constructor(baseConfig: RuntimeConfig) {
     this.config = cloneConfig(baseConfig);
@@ -302,6 +685,8 @@ class WebMidiPlayback implements PlaybackBackend {
       SAX: new Set(),
     };
     this.active = false;
+    this.sectionDuration = 0;
+    this.latestSectionEndMs = this.midiStartTimeMs;
   }
 
   async prepare(config: RuntimeConfig): Promise<boolean> {
@@ -313,6 +698,12 @@ class WebMidiPlayback implements PlaybackBackend {
       SAX: new Set(),
     };
     this.midiStartTimeMs = performance.now() + 200;
+    const quarter = 60 / this.config.tempo;
+    const base = quarter / 4;
+    const pairDuration = base * 2;
+    const total = totalSteps(this.config);
+    this.sectionDuration = this.stepStartSeconds(total, quarter, base, pairDuration);
+    this.latestSectionEndMs = this.midiStartTimeMs + this.sectionDuration * 1000;
 
     if (!('requestMIDIAccess' in navigator)) {
       this.clearMidi();
@@ -347,6 +738,10 @@ class WebMidiPlayback implements PlaybackBackend {
 
     const startSeconds = this.stepStartSeconds(stepIndex, 60 / this.config.tempo, (60 / this.config.tempo) / 4, (60 / this.config.tempo) / 2);
     const startTimeMs = this.midiStartTimeMs + startSeconds * 1000;
+    const sectionEndMs = startTimeMs + this.sectionDuration * 1000;
+    if (sectionEndMs > this.latestSectionEndMs) {
+      this.latestSectionEndMs = sectionEndMs;
+    }
 
     if (instrument === 'DRUMS') {
       this.enqueueMidiDrums(step, startTimeMs);
@@ -384,6 +779,16 @@ class WebMidiPlayback implements PlaybackBackend {
     this.active = false;
   }
 
+  getLeadSeconds(): number {
+    if (!this.active) return 0;
+    const lead = this.latestSectionEndMs - performance.now();
+    return lead > 0 ? lead / 1000 : 0;
+  }
+
+  getSectionDuration(): number {
+    return this.sectionDuration;
+  }
+
   private clearMidi(): void {
     this.midiOutput = null;
     this.midiAccess = null;
@@ -398,17 +803,21 @@ class WebMidiPlayback implements PlaybackBackend {
     return Math.max(0.05, end - start);
   }
 
-  private stepStartSeconds(stepIndex: number, quarter: number, base: number, pairDuration: number): number {
-    if (stepIndex >= totalSteps(this.config)) {
-      return stepIndex * base;
+  private stepStartSeconds(stepIndex: number, _quarter: number, base: number, pairDuration: number): number {
+    if (stepIndex <= 0) {
+      return 0;
     }
     const pairIndex = Math.floor(stepIndex / 2);
     const pairStart = pairIndex * pairDuration;
     const isOffbeat = stepIndex % 2 === 1;
-    if (!this.config.swingEnabled || !isOffbeat) {
+    if (!isOffbeat) {
       return pairStart;
     }
-    return pairStart + pairDuration * this.config.swingRatio;
+    if (!this.config.swingEnabled) {
+      return pairStart + base;
+    }
+    const swingRatio = Math.min(Math.max(this.config.swingRatio, 0), 1);
+    return pairStart + pairDuration * swingRatio;
   }
 
   private enqueueMidiDrums(step: TrackerStep, startTimeMs: number): void {

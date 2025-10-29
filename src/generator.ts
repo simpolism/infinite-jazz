@@ -3,8 +3,6 @@ import { TrackerParser, TrackerStreamParser } from './trackerParser.js';
 import { cloneConfig } from './config.js';
 import type { GenerationResult, RuntimeConfig, TrackerLineEvent } from './types.js';
 
-type StreamEmitPayload = { done?: true; chunk?: string };
-
 function buildMessages(promptText: string) {
   return [
     {
@@ -17,32 +15,6 @@ function buildMessages(promptText: string) {
       content: promptText,
     },
   ] as const;
-}
-
-function readEventStreamChunk(buffer: string, emit: (payload: StreamEmitPayload) => void): string {
-  const segments = buffer.split('\n\n');
-  let carry = segments.pop() ?? '';
-  for (const segment of segments) {
-    const line = segment.trim();
-    if (!line || !line.startsWith('data:')) continue;
-    const payload = line.slice(5).trim();
-    if (payload === '[DONE]') {
-      emit({ done: true });
-      continue;
-    }
-    try {
-      const json = JSON.parse(payload) as {
-        choices?: Array<{ delta?: { content?: string } }>;
-      };
-      const delta = json?.choices?.[0]?.delta?.content ?? '';
-      if (delta) {
-        emit({ chunk: delta });
-      }
-    } catch (error) {
-      console.warn('Failed to parse stream payload', error, payload);
-    }
-  }
-  return carry;
 }
 
 interface StreamSessionOptions {
@@ -127,7 +99,6 @@ export class JazzGenerator {
 
     const payload = {
       model,
-      stream: true,
       temperature: 0.85,
       messages: buildMessages(promptText),
     };
@@ -169,37 +140,26 @@ export class JazzGenerator {
       throw new Error(`API responded with ${response.status}: ${text}`);
     }
 
-    onStatus?.('Streaming tracker data…');
+    onStatus?.('Awaiting tracker data…');
 
-    if (!response.body) {
-      throw new Error('No response body available for streaming.');
+    let content = '';
+    try {
+      const json = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } | null }>;
+      };
+      content = json?.choices?.[0]?.message?.content ?? '';
+    } catch (error) {
+      const text = await response.text();
+      throw new Error(`Failed to parse response JSON: ${(error as Error).message}\n${text}`);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let carry = '';
-
-    const flush = (lineInfo: StreamEmitPayload) => {
-      if (lineInfo.done) {
-        onStatus?.('Generation complete.');
-        return;
-      }
-      if (!lineInfo.chunk) return;
-      const additions = this.streamParser.appendChunk(lineInfo.chunk);
-      for (const addition of additions) {
-        onTrackerLine?.(addition);
-      }
-    };
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      carry += decoder.decode(value, { stream: true });
-      carry = readEventStreamChunk(carry, flush);
+    if (!content.trim()) {
+      throw new Error('Received empty tracker response from model.');
     }
 
-    if (carry.trim()) {
-      readEventStreamChunk(carry, flush);
+    const additions = this.streamParser.appendChunk(content);
+    for (const addition of additions) {
+      onTrackerLine?.(addition);
     }
 
     const tailSteps = this.streamParser.finalize();
@@ -207,7 +167,7 @@ export class JazzGenerator {
       onTrackerLine?.(addition);
     }
 
-    onStatus?.('Session finished.');
+    onStatus?.('Generation complete.');
     this.activeController = null;
 
     return {

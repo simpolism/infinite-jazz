@@ -33,6 +33,10 @@ const NOTE_MAP: Record<string, number> = {
   'B#': 0,
 };
 
+function normalizeAccidentals(note: string): string {
+  return note.replace(/♯/g, '#').replace(/♭/g, 'b').replace(/♮/g, '');
+}
+
 const TRACKER_INSTRUMENTS: InstrumentName[] = ['BASS', 'DRUMS', 'PIANO', 'SAX'];
 
 interface ParsedNoteEntry {
@@ -54,7 +58,8 @@ function stripLineNumber(line: string): string {
 }
 
 export function noteToMidi(noteName: string): number {
-  const match = /^([A-G][#b]?)(-?\d+)$/.exec(noteName.trim());
+  const normalized = normalizeAccidentals(noteName.trim());
+  const match = /^([A-G][#b]?)(-?\d+)$/.exec(normalized);
   if (!match) {
     throw new Error(`Invalid note name: ${noteName}`);
   }
@@ -103,7 +108,7 @@ export function parseNoteEntry(entry: string): ParsedNoteEntry {
       throw new Error(`No valid velocity found in: ${velocityPart}`);
     }
     const velocity = Math.min(127, Math.max(0, Number.parseInt(velocityDigits, 10)));
-    const pitch = noteToMidi(pitchPart.trim());
+    const pitch = noteToMidi(normalizeAccidentals(pitchPart.trim()));
     notes.push({ pitch, velocity });
   }
   return { notes, isTie: false };

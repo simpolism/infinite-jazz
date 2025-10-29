@@ -61,16 +61,17 @@ function buildTempoTrack(config: RuntimeConfig): Uint8Array {
 function stepTick(config: RuntimeConfig, stepIndex: number): number {
   const tps = ticksPerStep(config);
   const pairTicks = tps * 2;
-  if (stepIndex >= totalSteps(config)) {
-    return stepIndex * tps;
-  }
   const pairIndex = Math.floor(stepIndex / 2);
   const base = pairIndex * pairTicks;
   const isOffbeat = stepIndex % 2 === 1;
-  if (!config.swingEnabled || !isOffbeat) {
+  if (!isOffbeat) {
     return base;
   }
-  return base + Math.round(pairTicks * config.swingRatio);
+  if (!config.swingEnabled) {
+    return base + tps;
+  }
+  const swingRatio = Math.min(Math.max(config.swingRatio, 0), 1);
+  return base + Math.round(pairTicks * swingRatio);
 }
 
 function addEvent(events: number[], state: { lastTick: number }, tick: number, bytes: number[]) {
