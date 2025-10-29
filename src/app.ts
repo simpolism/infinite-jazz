@@ -5,6 +5,9 @@ import { TrackerParser } from './trackerParser.js';
 import { cloneConfig, DEFAULT_CONFIG } from './config.js';
 import type { InstrumentName, RuntimeConfig } from './types.js';
 
+const CONTEXT_STEPS = 32;
+const TRACKER_INSTRUMENTS: InstrumentName[] = ['BASS', 'DRUMS', 'PIANO', 'SAX'];
+
 function requireElement<T extends Element>(value: Element | null, message: string): T {
   if (!value) {
     throw new Error(message);
@@ -44,9 +47,15 @@ let playback = new PlaybackEngine(DEFAULT_CONFIG);
 let midiExporter = new MidiExporter(DEFAULT_CONFIG);
 let displayedCounts: Record<InstrumentName, number> | null = null;
 let latestTrackerText = '';
-let previousTrackerContext = '';
 let latestConfig: RuntimeConfig = cloneConfig();
 let pendingDownloadUrl: string | null = null;
+let contextHistory = emptyInstrumentBuckets();
+let contextTrimmed = {
+  BASS: false,
+  DRUMS: false,
+  PIANO: false,
+  SAX: false,
+} as Record<InstrumentName, boolean>;
 
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
@@ -63,6 +72,7 @@ function resetUI() {
     SAX: 0,
   };
   latestTrackerText = '';
+  resetContextHistory();
   if (pendingDownloadUrl) {
     URL.revokeObjectURL(pendingDownloadUrl);
     pendingDownloadUrl = null;
@@ -71,16 +81,19 @@ function resetUI() {
   copyButton.disabled = true;
 }
 
-function appendTrackerLine(instrument: InstrumentName, line: string) {
-  if (!trackerOutput || !displayedCounts) return;
+function appendTrackerLine(instrument: InstrumentName, line: string): number {
+  if (!trackerOutput || !displayedCounts) return 0;
+  const currentIndex = displayedCounts[instrument];
   const totalDisplayed =
     displayedCounts.BASS + displayedCounts.DRUMS + displayedCounts.PIANO + displayedCounts.SAX;
-  if (displayedCounts[instrument] === 0) {
+  const needsSeparator = totalDisplayed > 0 && instrumentOrderReset(line, currentIndex);
+  if (currentIndex === 0 || needsSeparator) {
     trackerOutput.textContent += `${totalDisplayed > 0 ? '\n' : ''}${instrument}\n`;
   }
   trackerOutput.textContent += `${line}\n`;
-  displayedCounts[instrument] += 1;
+  displayedCounts[instrument] = currentIndex + 1;
   trackerOutput.scrollTop = trackerOutput.scrollHeight;
+  return currentIndex;
 }
 
 async function handleSubmit(event: SubmitEvent) {
@@ -109,37 +122,20 @@ async function handleSubmit(event: SubmitEvent) {
     swingEnabled,
   });
 
-  playback.prepare(latestConfig);
+  await playback.prepare(latestConfig);
   midiExporter.setConfig(latestConfig);
 
   try {
-    const result = await generator.streamSession({
+    await runContinuousGeneration({
       apiKey,
       baseUrl,
       model,
-      extraPrompt: prompt,
-      previousContext: previousTrackerContext,
-      barsPerGeneration: bars,
+      prompt,
+      bars,
       tempo,
       swingEnabled,
       swingRatio: latestConfig.swingRatio,
-      onTrackerLine: ({ instrument, stepIndex, step, line }) => {
-        appendTrackerLine(instrument, line);
-        playback.enqueueStep(instrument, stepIndex, step);
-      },
-      onStatus: (message) => setStatus(message),
     });
-
-    if (result?.aborted) {
-      setStatus('Generation aborted.');
-      return;
-    }
-
-    latestTrackerText = result.trackerText;
-    previousTrackerContext = result.trackerText;
-    downloadButton.disabled = latestTrackerText.length === 0;
-    copyButton.disabled = latestTrackerText.length === 0;
-    setStatus('Ready – playback finished.');
   } catch (error) {
     const err = error as Error;
     console.error(err);
@@ -196,6 +192,141 @@ function handleDownload() {
   } catch (error) {
     console.error(error);
     setStatus('Unable to build MIDI file.', true);
+  }
+}
+
+function instrumentOrderReset(line: string, currentIndex: number): boolean {
+  if (currentIndex !== 0) {
+    return /^\s*1[.\s]/.test(line);
+  }
+  return false;
+}
+
+function resetContextHistory(): void {
+  contextHistory = emptyInstrumentBuckets();
+  contextTrimmed = {
+    BASS: false,
+    DRUMS: false,
+    PIANO: false,
+    SAX: false,
+  };
+}
+
+function emptyInstrumentBuckets(): Record<InstrumentName, string[]> {
+  return {
+    BASS: [],
+    DRUMS: [],
+    PIANO: [],
+    SAX: [],
+  };
+}
+
+function extractInstrumentSections(trackerText: string): Record<InstrumentName, string[]> {
+  const sections = emptyInstrumentBuckets();
+  let current: InstrumentName | null = null;
+  for (const rawLine of trackerText.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if ((TRACKER_INSTRUMENTS as string[]).includes(trimmed)) {
+      current = trimmed as InstrumentName;
+      continue;
+    }
+    if (!current) {
+      continue;
+    }
+    sections[current].push(trimmed);
+  }
+  return sections;
+}
+
+function stripLineNumber(line: string): string {
+  return line.replace(/^\s*\d+\.?\s+/, '').trim();
+}
+
+function updateContextHistory(trackerText: string): void {
+  const sections = extractInstrumentSections(trackerText);
+  for (const instrument of TRACKER_INSTRUMENTS) {
+    const existing = contextHistory[instrument];
+    const additions = sections[instrument].map((entry) => stripLineNumber(entry));
+    const combined = existing.concat(additions);
+    const trimmed = combined.length > CONTEXT_STEPS;
+    contextHistory[instrument] = trimmed ? combined.slice(-CONTEXT_STEPS) : combined;
+    contextTrimmed[instrument] = trimmed;
+  }
+}
+
+function buildPreviousContext(): string {
+  const parts: string[] = [];
+  for (const instrument of TRACKER_INSTRUMENTS) {
+    const lines = contextHistory[instrument];
+    if (!lines.length) continue;
+    const prefix = contextTrimmed[instrument] ? '...' : '';
+    parts.push(`${instrument} (recent):\n${prefix}${lines.join('\n')}`);
+  }
+  return parts.join('\n\n');
+}
+
+async function runContinuousGeneration(options: {
+  apiKey?: string;
+  baseUrl: string;
+  model: string;
+  prompt: string;
+  bars: number;
+  tempo: number;
+  swingEnabled: boolean;
+  swingRatio: number;
+}): Promise<void> {
+  while (isRunning) {
+    const session = generator.streamSession({
+      apiKey: options.apiKey,
+      baseUrl: options.baseUrl,
+      model: options.model,
+      extraPrompt: options.prompt,
+      previousContext: buildPreviousContext(),
+      barsPerGeneration: options.bars,
+      tempo: options.tempo,
+      swingEnabled: options.swingEnabled,
+      swingRatio: options.swingRatio,
+      onTrackerLine: ({ instrument, stepIndex, step, line }) => {
+        const globalIndex = appendTrackerLine(instrument, line);
+        const playbackIndex = displayedCounts ? globalIndex : stepIndex;
+        playback.enqueueStep(instrument, playbackIndex, step);
+      },
+      onStatus: (message) => setStatus(message),
+    });
+
+    let result: Awaited<typeof session>;
+    try {
+      result = await session;
+    } catch (error) {
+      if (!isRunning) {
+        break;
+      }
+      throw error;
+    }
+
+    if (!isRunning) {
+      break;
+    }
+
+    if (result?.aborted) {
+      setStatus('Generation aborted.');
+      break;
+    }
+
+    latestTrackerText = result.trackerText;
+    updateContextHistory(result.trackerText);
+    downloadButton.disabled = latestTrackerText.length === 0;
+    copyButton.disabled = latestTrackerText.length === 0;
+    setStatus('Section complete – generating next…');
+  }
+
+  if (!isRunning) {
+    setStatus('Session aborted by user.');
+  } else {
+    setStatus('Ready – playback finished.');
   }
 }
 

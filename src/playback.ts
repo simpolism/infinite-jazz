@@ -1,5 +1,5 @@
 import { midiToFrequency } from './trackerParser.js';
-import { cloneConfig, totalSteps } from './config.js';
+import { cloneConfig } from './config.js';
 import type { InstrumentName, RuntimeConfig, TrackerStep } from './types.js';
 
 const DRUM_FREQUENCIES: Record<number, number> = {
@@ -24,6 +24,7 @@ interface ActiveVoice {
 }
 
 type VoiceRegistry = Record<Exclude<InstrumentName, 'DRUMS'>, Map<string, ActiveVoice>>;
+type MidiVoiceRegistry = Record<InstrumentName, Set<number>>;
 
 export class PlaybackEngine {
   private config: RuntimeConfig;
@@ -33,6 +34,11 @@ export class PlaybackEngine {
   private activeVoices: VoiceRegistry;
   private started: boolean;
   private noiseBuffer: AudioBuffer | null;
+  private midiAccess: MIDIAccess | null;
+  private midiOutput: MIDIOutput | null;
+  private midiStartTimeMs: number;
+  private midiVoices: MidiVoiceRegistry;
+  private midiEnabled: boolean;
 
   constructor(baseConfig: RuntimeConfig) {
     this.config = cloneConfig(baseConfig);
@@ -42,18 +48,29 @@ export class PlaybackEngine {
     this.activeVoices = this.createVoiceRegistry();
     this.started = false;
     this.noiseBuffer = null;
+    this.midiAccess = null;
+    this.midiOutput = null;
+    this.midiStartTimeMs = performance.now();
+    this.midiVoices = this.createMidiRegistry();
+    this.midiEnabled = false;
   }
 
-  prepare(config: RuntimeConfig): void {
+  async prepare(config: RuntimeConfig): Promise<void> {
     this.config = cloneConfig(config);
     this.started = false;
     this.activeVoices = this.createVoiceRegistry();
+    this.midiVoices = this.createMidiRegistry();
+    await this.setupMidiBackend();
     if (this.context && this.context.state === 'running') {
       this.stopAll();
     }
   }
 
   enqueueStep(instrument: InstrumentName, stepIndex: number, step: TrackerStep): void {
+    if (this.midiOutput && this.midiEnabled) {
+      this.enqueueMidiStep(instrument, stepIndex, step);
+      return;
+    }
     if (instrument === 'DRUMS') {
       this.enqueueDrums(stepIndex, step);
       return;
@@ -78,6 +95,9 @@ export class PlaybackEngine {
   }
 
   stopAll(): void {
+    if (this.midiOutput && this.midiEnabled) {
+      this.stopAllMidi();
+    }
     const context = this.context;
     for (const map of Object.values(this.activeVoices)) {
       for (const voice of map.values()) {
@@ -95,6 +115,9 @@ export class PlaybackEngine {
       this.destination = null;
     }
     this.started = false;
+    this.midiEnabled = false;
+    this.midiOutput = null;
+    this.midiAccess = null;
   }
 
   private createVoiceRegistry(): VoiceRegistry {
@@ -103,6 +126,37 @@ export class PlaybackEngine {
       PIANO: new Map(),
       SAX: new Map(),
     };
+  }
+
+  private createMidiRegistry(): MidiVoiceRegistry {
+    return {
+      BASS: new Set(),
+      DRUMS: new Set(),
+      PIANO: new Set(),
+      SAX: new Set(),
+    };
+  }
+
+  private async setupMidiBackend(): Promise<void> {
+    if (!('requestMIDIAccess' in navigator)) {
+      this.midiEnabled = false;
+      this.midiOutput = null;
+      return;
+    }
+    try {
+      this.midiAccess = await navigator.requestMIDIAccess();
+      const outputs = Array.from(this.midiAccess.outputs.values());
+      this.midiOutput = outputs[0] ?? null;
+      this.midiEnabled = Boolean(this.midiOutput);
+      if (this.midiEnabled) {
+        this.midiStartTimeMs = performance.now() + 200;
+      }
+    } catch (error) {
+      console.warn('Failed to initialize Web MIDI output', error);
+      this.midiAccess = null;
+      this.midiOutput = null;
+      this.midiEnabled = false;
+    }
   }
 
   private ensureContext(): void {
@@ -141,9 +195,6 @@ export class PlaybackEngine {
     base: number,
     pairDuration: number
   ): number {
-    if (stepIndex >= totalSteps(this.config)) {
-      return stepIndex * base;
-    }
     const pairIndex = Math.floor(stepIndex / 2);
     const pairStart = pairIndex * pairDuration;
     const isOffbeat = stepIndex % 2 === 1;
@@ -161,6 +212,71 @@ export class PlaybackEngine {
       this.releaseVoice(voice, atTime, context ?? undefined);
     }
     voices.clear();
+  }
+
+  private enqueueMidiStep(instrument: InstrumentName, stepIndex: number, step: TrackerStep): void {
+    const output = this.midiOutput;
+    if (!output) return;
+
+    if (instrument === 'DRUMS') {
+      this.enqueueMidiDrums(stepIndex, step);
+      return;
+    }
+    if (step.isTie) {
+      return;
+    }
+
+    const startSeconds = this.stepStartSeconds(stepIndex, 60 / this.config.tempo, (60 / this.config.tempo) / 4, (60 / this.config.tempo) / 2);
+    const startTimeMs = this.midiStartTimeMs + startSeconds * 1000;
+    this.stopMidiInstrument(instrument, startTimeMs);
+    if (step.isRest) {
+      return;
+    }
+    const durationMs = this.stepDurationSeconds(stepIndex) * 1000;
+    const channel = this.config.channels[instrument];
+    for (const note of step.notes) {
+      const velocity = Math.max(1, Math.min(127, note.velocity));
+      output.send([0x90 | channel, note.pitch, velocity], startTimeMs);
+      output.send([0x80 | channel, note.pitch, 0], startTimeMs + durationMs);
+      this.midiVoices[instrument].add(note.pitch);
+    }
+  }
+
+  private enqueueMidiDrums(stepIndex: number, step: TrackerStep): void {
+    if (step.isRest || step.isTie) return;
+    const output = this.midiOutput;
+    if (!output) return;
+    const startSeconds = this.stepStartSeconds(stepIndex, 60 / this.config.tempo, (60 / this.config.tempo) / 4, (60 / this.config.tempo) / 2);
+    const startTimeMs = this.midiStartTimeMs + startSeconds * 1000;
+    const channel = this.config.channels.DRUMS;
+    for (const note of step.notes) {
+      const velocity = Math.max(1, Math.min(127, note.velocity));
+      output.send([0x90 | channel, note.pitch, velocity], startTimeMs);
+      output.send([0x80 | channel, note.pitch, 0], startTimeMs + 120);
+    }
+  }
+
+  private stopMidiInstrument(instrument: InstrumentName, atTimeMs: number): void {
+    const output = this.midiOutput;
+    if (!output) return;
+    const channel = this.config.channels[instrument];
+    const voices = this.midiVoices[instrument];
+    voices.forEach((pitch) => {
+      output.send([0x80 | channel, pitch, 0], atTimeMs);
+    });
+    voices.clear();
+  }
+
+  private stopAllMidi(): void {
+    const output = this.midiOutput;
+    if (!output) return;
+    const now = performance.now();
+    for (const instrument of Object.keys(this.midiVoices) as InstrumentName[]) {
+      this.stopMidiInstrument(instrument, now);
+      const channel = this.config.channels[instrument];
+      output.send([0xb0 | channel, 120, 0], now);
+      output.send([0xb0 | channel, 123, 0], now);
+    }
   }
 
   private startVoice(
