@@ -123,6 +123,18 @@ button {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+button.button--ghost {
+  background: rgba(12, 15, 24, 0.75);
+  color: rgba(245, 247, 251, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: none;
+}
+
+button.button--ghost:not([disabled]):hover {
+  background: rgba(20, 26, 40, 0.9);
+  box-shadow: 0 10px 24px rgba(82, 154, 245, 0.25);
+}
+
 button[disabled] {
   cursor: not-allowed;
   opacity: 0.55;

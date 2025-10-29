@@ -1,5 +1,5 @@
 import { JazzGenerator } from './generator.js';
-import { PlaybackEngine } from './playback.js';
+import { PlaybackEngine, type PlaybackBackendName } from './playback.js';
 import { MidiExporter } from './midi.js';
 import { TrackerParser } from './trackerParser.js';
 import { cloneConfig, DEFAULT_CONFIG } from './config.js';
@@ -29,6 +29,10 @@ const startButton = requireElement<HTMLButtonElement>(
 const stopButton = requireElement<HTMLButtonElement>(
   document.getElementById('stop-button'),
   'Stop button missing.'
+);
+const playbackToggleButton = requireElement<HTMLButtonElement>(
+  document.getElementById('toggle-playback'),
+  'Playback toggle button missing.'
 );
 const downloadButton = requireElement<HTMLButtonElement>(
   document.getElementById('download-midi'),
@@ -71,6 +75,8 @@ interface PromptPreset {
 let isRunning = false;
 let generator = new JazzGenerator(DEFAULT_CONFIG);
 let playback = new PlaybackEngine(DEFAULT_CONFIG);
+let activePlaybackBackend: PlaybackBackendName = playback.getActiveBackend();
+let isSwitchingPlayback = false;
 let midiExporter = new MidiExporter(DEFAULT_CONFIG);
 let latestTrackerText = '';
 let latestConfig: RuntimeConfig = cloneConfig();
@@ -83,6 +89,16 @@ function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
   statusEl.dataset.status = isError ? 'error' : 'info';
   statusEl.style.color = isError ? '#ff9a9a' : '';
+}
+
+function refreshPlaybackToggleControl(): void {
+  const label =
+    activePlaybackBackend === 'soundfont'
+      ? 'Switch to External MIDI'
+      : 'Switch to Soundfont';
+  playbackToggleButton.textContent = label;
+  playbackToggleButton.disabled = isRunning || isSwitchingPlayback;
+  playbackToggleButton.dataset.mode = activePlaybackBackend;
 }
 
 function resetSessionState(): void {
@@ -271,6 +287,7 @@ async function handleSubmit(event: SubmitEvent) {
   isRunning = true;
   startButton.disabled = true;
   stopButton.disabled = false;
+  refreshPlaybackToggleControl();
 
   latestConfig = cloneConfig({
     tempo,
@@ -279,7 +296,20 @@ async function handleSubmit(event: SubmitEvent) {
   });
   refreshDefaultPrompt();
 
-  await playback.prepare(latestConfig);
+  try {
+    activePlaybackBackend = await playback.prepare(latestConfig);
+  } catch (error) {
+    const err = error as Error;
+    console.error(err);
+    setStatus(err.message || 'Unable to initialize playback.', true);
+    isRunning = false;
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    refreshPlaybackToggleControl();
+    return;
+  }
+
+  refreshPlaybackToggleControl();
   midiExporter.setConfig(latestConfig);
 
   try {
@@ -301,6 +331,7 @@ async function handleSubmit(event: SubmitEvent) {
     isRunning = false;
     startButton.disabled = false;
     stopButton.disabled = true;
+    refreshPlaybackToggleControl();
   }
 }
 
@@ -310,6 +341,7 @@ function handleStop() {
     setStatus('Playback stopped.');
     downloadButton.disabled = latestTrackerText.length === 0;
     copyButton.disabled = latestTrackerText.length === 0;
+    refreshPlaybackToggleControl();
     return;
   }
   generator.abort();
@@ -321,6 +353,7 @@ function handleStop() {
   copyButton.disabled = latestTrackerText.length === 0;
   startButton.disabled = false;
   stopButton.disabled = true;
+  refreshPlaybackToggleControl();
 }
 
 async function handleCopy() {
@@ -354,6 +387,35 @@ function handleDownload() {
   } catch (error) {
     console.error(error);
     setStatus('Unable to build MIDI file.', true);
+  }
+}
+
+async function handlePlaybackToggle(): Promise<void> {
+  if (isRunning || isSwitchingPlayback) return;
+  const target: PlaybackBackendName = activePlaybackBackend === 'soundfont' ? 'midi' : 'soundfont';
+  isSwitchingPlayback = true;
+  refreshPlaybackToggleControl();
+  try {
+    const nextBackend = await playback.useBackend(latestConfig, target);
+    activePlaybackBackend = nextBackend;
+    if (nextBackend === target) {
+      const message =
+        nextBackend === 'midi'
+          ? 'External MIDI playback enabled.'
+          : 'Soundfont playback enabled.';
+      setStatus(message);
+    } else if (target === 'midi') {
+      setStatus('External MIDI output unavailable – continuing with built-in soundfont.', true);
+    } else {
+      setStatus('Switched back to soundfont playback.');
+    }
+  } catch (error) {
+    const err = error as Error;
+    console.error(err);
+    setStatus(err.message || 'Unable to change playback backend.', true);
+  } finally {
+    isSwitchingPlayback = false;
+    refreshPlaybackToggleControl();
   }
 }
 
@@ -487,6 +549,7 @@ async function runContinuousGeneration(options: {
 
 form.addEventListener('submit', handleSubmit);
 stopButton.addEventListener('click', handleStop);
+playbackToggleButton.addEventListener('click', handlePlaybackToggle);
 downloadButton.addEventListener('click', handleDownload);
 copyButton.addEventListener('click', handleCopy);
 form.addEventListener('change', handleFormChange);
@@ -501,4 +564,5 @@ promptLibrary = loadPromptLibraryFromStorage();
 populatePromptSelect(DEFAULT_PROMPT_ID);
 applyStoredSettings();
 resetUI();
+refreshPlaybackToggleControl();
 setStatus('Idle – configure the session and start streaming.');

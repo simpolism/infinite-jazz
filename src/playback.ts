@@ -21,27 +21,68 @@ interface PlaybackBackend {
   shutdown(): void;
 }
 
+export type PlaybackBackendName = 'soundfont' | 'midi';
+
 export class PlaybackEngine {
   private midiBackend: WebMidiPlayback;
   private synthBackend: SoundfontPlayback;
   private activeBackend: PlaybackBackend;
+  private preferredBackend: PlaybackBackendName;
+  private activeBackendName: PlaybackBackendName;
 
   constructor(baseConfig: RuntimeConfig) {
     this.midiBackend = new WebMidiPlayback(baseConfig);
     this.synthBackend = new SoundfontPlayback(baseConfig);
     this.activeBackend = this.synthBackend;
+    this.preferredBackend = 'soundfont';
+    this.activeBackendName = 'soundfont';
   }
 
-  async prepare(config: RuntimeConfig): Promise<void> {
-    const midiReady = await this.midiBackend.prepare(config);
-    if (midiReady) {
-      this.activeBackend = this.midiBackend;
-      this.synthBackend.shutdown();
-      return;
+  async prepare(config: RuntimeConfig): Promise<PlaybackBackendName> {
+    this.stopAll();
+    const order: PlaybackBackendName[] =
+      this.preferredBackend === 'midi' ? ['midi', 'soundfont'] : ['soundfont', 'midi'];
+    let lastError: unknown = null;
+
+    for (const backendName of order) {
+      const backend = backendName === 'midi' ? this.midiBackend : this.synthBackend;
+      try {
+        const ready = await backend.prepare(config);
+        if (!ready) {
+          backend.shutdown();
+          continue;
+        }
+        this.activeBackend = backend;
+        this.activeBackendName = backendName;
+        this.preferredBackend = backendName;
+        if (backendName === 'midi') {
+          this.synthBackend.shutdown();
+        } else {
+          this.midiBackend.shutdown();
+        }
+        return backendName;
+      } catch (error) {
+        lastError = error;
+        backend.shutdown();
+      }
     }
-    this.midiBackend.shutdown();
-    await this.synthBackend.prepare(config);
+
     this.activeBackend = this.synthBackend;
+    this.activeBackendName = 'soundfont';
+
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+    throw new Error('No playback backend available.');
+  }
+
+  async useBackend(config: RuntimeConfig, backendName: PlaybackBackendName): Promise<PlaybackBackendName> {
+    this.preferredBackend = backendName;
+    return this.prepare(config);
+  }
+
+  getActiveBackend(): PlaybackBackendName {
+    return this.activeBackendName;
   }
 
   enqueueStep(instrument: InstrumentName, stepIndex: number, step: TrackerStep): void {
