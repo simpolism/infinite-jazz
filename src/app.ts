@@ -1,28 +1,54 @@
-import { JazzGenerator } from './js/generator.js';
-import { PlaybackEngine } from './js/playback.js';
-import { MidiExporter } from './js/midi.js';
-import { TrackerParser } from './js/trackerParser.js';
-import { cloneConfig, DEFAULT_CONFIG } from './js/config.js';
+import { JazzGenerator } from './generator.js';
+import { PlaybackEngine } from './playback.js';
+import { MidiExporter } from './midi.js';
+import { TrackerParser } from './trackerParser.js';
+import { cloneConfig, DEFAULT_CONFIG } from './config.js';
+import type { InstrumentName, RuntimeConfig } from './types.js';
 
-const form = document.getElementById('session-form');
-const statusEl = document.getElementById('status');
-const trackerOutput = document.getElementById('tracker-output');
-const startButton = document.getElementById('start-button');
-const stopButton = document.getElementById('stop-button');
-const downloadButton = document.getElementById('download-midi');
-const copyButton = document.getElementById('copy-tracker');
+function requireElement<T extends Element>(value: Element | null, message: string): T {
+  if (!value) {
+    throw new Error(message);
+  }
+  return value as T;
+}
+
+const form = requireElement<HTMLFormElement>(
+  document.getElementById('session-form'),
+  'Unable to find session form.'
+);
+const statusEl = requireElement<HTMLElement>(document.getElementById('status'), 'Status element missing.');
+const trackerOutput = requireElement<HTMLElement>(
+  document.getElementById('tracker-output'),
+  'Tracker output element missing.'
+);
+const startButton = requireElement<HTMLButtonElement>(
+  document.getElementById('start-button'),
+  'Start button missing.'
+);
+const stopButton = requireElement<HTMLButtonElement>(
+  document.getElementById('stop-button'),
+  'Stop button missing.'
+);
+const downloadButton = requireElement<HTMLButtonElement>(
+  document.getElementById('download-midi'),
+  'Download button missing.'
+);
+const copyButton = requireElement<HTMLButtonElement>(
+  document.getElementById('copy-tracker'),
+  'Copy button missing.'
+);
 
 let isRunning = false;
 let generator = new JazzGenerator(DEFAULT_CONFIG);
 let playback = new PlaybackEngine(DEFAULT_CONFIG);
 let midiExporter = new MidiExporter(DEFAULT_CONFIG);
-let displayedCounts = null;
+let displayedCounts: Record<InstrumentName, number> | null = null;
 let latestTrackerText = '';
 let previousTrackerContext = '';
-let latestConfig = cloneConfig();
-let pendingDownloadUrl = null;
+let latestConfig: RuntimeConfig = cloneConfig();
+let pendingDownloadUrl: string | null = null;
 
-function setStatus(message, isError = false) {
+function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
   statusEl.dataset.status = isError ? 'error' : 'info';
   statusEl.style.color = isError ? '#ff9a9a' : '';
@@ -45,26 +71,29 @@ function resetUI() {
   copyButton.disabled = true;
 }
 
-function appendTrackerLine(instrument, line) {
+function appendTrackerLine(instrument: InstrumentName, line: string) {
+  if (!trackerOutput || !displayedCounts) return;
+  const totalDisplayed =
+    displayedCounts.BASS + displayedCounts.DRUMS + displayedCounts.PIANO + displayedCounts.SAX;
   if (displayedCounts[instrument] === 0) {
-    trackerOutput.textContent += `${displayedCounts.BASS + displayedCounts.DRUMS + displayedCounts.PIANO + displayedCounts.SAX > 0 ? '\n' : ''}${instrument}\n`;
+    trackerOutput.textContent += `${totalDisplayed > 0 ? '\n' : ''}${instrument}\n`;
   }
   trackerOutput.textContent += `${line}\n`;
   displayedCounts[instrument] += 1;
   trackerOutput.scrollTop = trackerOutput.scrollHeight;
 }
 
-async function handleSubmit(event) {
+async function handleSubmit(event: SubmitEvent) {
   event.preventDefault();
   if (isRunning) return;
 
   const formData = new FormData(form);
-  const apiKey = formData.get('apiKey');
-  const baseUrl = formData.get('baseUrl');
-  const model = formData.get('model');
-  const prompt = formData.get('prompt') || '';
-  const bars = Number.parseInt(formData.get('bars'), 10) || DEFAULT_CONFIG.barsPerGeneration;
-  const tempo = Number.parseInt(formData.get('tempo'), 10) || DEFAULT_CONFIG.tempo;
+  const apiKey = formData.get('apiKey')?.toString();
+  const baseUrl = formData.get('baseUrl')?.toString() ?? '';
+  const model = formData.get('model')?.toString() ?? '';
+  const prompt = formData.get('prompt')?.toString() ?? '';
+  const bars = Number.parseInt(formData.get('bars')?.toString() ?? '', 10) || DEFAULT_CONFIG.barsPerGeneration;
+  const tempo = Number.parseInt(formData.get('tempo')?.toString() ?? '', 10) || DEFAULT_CONFIG.tempo;
   const swingEnabled = formData.get('swing') !== null;
 
   resetUI();
@@ -108,12 +137,13 @@ async function handleSubmit(event) {
 
     latestTrackerText = result.trackerText;
     previousTrackerContext = result.trackerText;
-    downloadButton.disabled = !latestTrackerText;
-    copyButton.disabled = !latestTrackerText;
+    downloadButton.disabled = latestTrackerText.length === 0;
+    copyButton.disabled = latestTrackerText.length === 0;
     setStatus('Ready – playback finished.');
   } catch (error) {
-    console.error(error);
-    setStatus(error.message || 'Generation failed.', true);
+    const err = error as Error;
+    console.error(err);
+    setStatus(err.message || 'Generation failed.', true);
   } finally {
     isRunning = false;
     startButton.disabled = false;

@@ -1,6 +1,7 @@
 import { cloneConfig, ticksPerStep, totalSteps } from './config.js';
+import type { ParsedTrack, ParsedTracker, RuntimeConfig } from './types.js';
 
-function writeUint32BE(value) {
+function writeUint32BE(value: number): number[] {
   return [
     (value >> 24) & 0xff,
     (value >> 16) & 0xff,
@@ -9,20 +10,20 @@ function writeUint32BE(value) {
   ];
 }
 
-function writeUint16BE(value) {
-  return [
-    (value >> 8) & 0xff,
-    value & 0xff,
-  ];
+function writeUint16BE(value: number): number[] {
+  return [(value >> 8) & 0xff, value & 0xff];
 }
 
-function encodeVLQ(value) {
-  const bytes = [];
+function encodeVLQ(value: number): number[] {
+  const bytes: number[] = [];
   let buffer = value & 0x7f;
-  while ((value >>= 7)) {
+  let remaining = value >> 7;
+  while (remaining > 0) {
     buffer <<= 8;
-    buffer |= (value & 0x7f) | 0x80;
+    buffer |= (remaining & 0x7f) | 0x80;
+    remaining >>= 7;
   }
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     bytes.push(buffer & 0xff);
     if (buffer & 0x80) {
@@ -34,13 +35,13 @@ function encodeVLQ(value) {
   return bytes;
 }
 
-function midiTrackChunk(dataBytes) {
+function midiTrackChunk(dataBytes: number[]): Uint8Array {
   const header = [0x4d, 0x54, 0x72, 0x6b]; // 'MTrk'
   const length = writeUint32BE(dataBytes.length);
   return new Uint8Array([...header, ...length, ...dataBytes]);
 }
 
-function midiHeaderChunk(trackCount, division) {
+function midiHeaderChunk(trackCount: number, division: number): Uint8Array {
   const header = [0x4d, 0x54, 0x68, 0x64]; // 'MThd'
   const length = writeUint32BE(6);
   const formatType = writeUint16BE(trackCount > 1 ? 1 : 0);
@@ -49,15 +50,15 @@ function midiHeaderChunk(trackCount, division) {
   return new Uint8Array([...header, ...length, ...formatType, ...tracks, ...divisionBytes]);
 }
 
-function buildTempoTrack(config) {
-  const events = [];
+function buildTempoTrack(config: RuntimeConfig): Uint8Array {
+  const events: number[] = [];
   const tempo = Math.round(60000000 / config.tempo);
   events.push(0x00, 0xff, 0x51, 0x03, (tempo >> 16) & 0xff, (tempo >> 8) & 0xff, tempo & 0xff);
   events.push(0x00, 0xff, 0x2f, 0x00);
   return midiTrackChunk(events);
 }
 
-function stepTick(config, stepIndex) {
+function stepTick(config: RuntimeConfig, stepIndex: number): number {
   const tps = ticksPerStep(config);
   const pairTicks = tps * 2;
   if (stepIndex >= totalSteps(config)) {
@@ -72,19 +73,23 @@ function stepTick(config, stepIndex) {
   return base + Math.round(pairTicks * config.swingRatio);
 }
 
-function addEvent(events, state, tick, bytes) {
+function addEvent(events: number[], state: { lastTick: number }, tick: number, bytes: number[]) {
   const delta = Math.max(0, tick - state.lastTick);
   events.push(...encodeVLQ(delta), ...bytes);
   state.lastTick = tick;
 }
 
-function addZeroDelta(events, bytes) {
+function addZeroDelta(events: number[], bytes: number[]) {
   events.push(0x00, ...bytes);
 }
 
-function buildInstrumentTrack(config, instrumentName, track) {
-  const channel = config.channels[instrumentName] ?? 0;
-  const events = [];
+function buildInstrumentTrack(
+  config: RuntimeConfig,
+  instrumentName: string,
+  track: ParsedTrack
+): Uint8Array {
+  const channel = config.channels[instrumentName as keyof RuntimeConfig['channels']] ?? 0;
+  const events: number[] = [];
   const state = { lastTick: 0 };
 
   // Track name
@@ -92,11 +97,12 @@ function buildInstrumentTrack(config, instrumentName, track) {
   events.push(0x00, 0xff, 0x03, nameBytes.length, ...nameBytes);
 
   if (instrumentName !== 'DRUMS') {
-    const program = config.gmPrograms[instrumentName] ?? 0;
+    const programKey = instrumentName as keyof RuntimeConfig['gmPrograms'];
+    const program = config.gmPrograms[programKey] ?? 0;
     addEvent(events, state, 0, [0xc0 | channel, program]);
   }
 
-  const activeNotes = new Map();
+  const activeNotes = new Map<number, true>();
   const stepCount = track.steps.length;
 
   for (let idx = 0; idx < stepCount; idx += 1) {
@@ -107,7 +113,7 @@ function buildInstrumentTrack(config, instrumentName, track) {
       if (step.isRest || step.isTie || step.notes.length === 0) {
         continue;
       }
-      const noteOnBytes = [0x90 | channel, 0, 0];
+      const noteOnBytes: [number, number, number] = [0x90 | channel, 0, 0];
       let first = true;
       for (const note of step.notes) {
         noteOnBytes[1] = note.pitch;
@@ -122,7 +128,7 @@ function buildInstrumentTrack(config, instrumentName, track) {
       const offTick = tick + Math.max(12, Math.round(ticksPerStep(config) / 2));
       let offFirst = true;
       for (const note of step.notes) {
-        const offBytes = [0x80 | channel, note.pitch, 0x00];
+        const offBytes: [number, number, number] = [0x80 | channel, note.pitch, 0x00];
         if (offFirst) {
           addEvent(events, state, offTick, offBytes);
           offFirst = false;
@@ -140,7 +146,7 @@ function buildInstrumentTrack(config, instrumentName, track) {
     if (activeNotes.size > 0) {
       let first = true;
       for (const pitch of activeNotes.keys()) {
-        const offBytes = [0x80 | channel, pitch, 0x00];
+        const offBytes: [number, number, number] = [0x80 | channel, pitch, 0x00];
         if (first) {
           addEvent(events, state, tick, offBytes);
           first = false;
@@ -157,7 +163,11 @@ function buildInstrumentTrack(config, instrumentName, track) {
 
     let firstOn = true;
     for (const note of step.notes) {
-      const onBytes = [0x90 | channel, note.pitch, Math.max(1, Math.min(127, note.velocity))];
+      const onBytes: [number, number, number] = [
+        0x90 | channel,
+        note.pitch,
+        Math.max(1, Math.min(127, note.velocity)),
+      ];
       if (firstOn) {
         addEvent(events, state, tick, onBytes);
         firstOn = false;
@@ -172,7 +182,7 @@ function buildInstrumentTrack(config, instrumentName, track) {
   if (activeNotes.size > 0) {
     let first = true;
     for (const pitch of activeNotes.keys()) {
-      const offBytes = [0x80 | channel, pitch, 0x00];
+      const offBytes: [number, number, number] = [0x80 | channel, pitch, 0x00];
       if (first) {
         addEvent(events, state, finalTick, offBytes);
         first = false;
@@ -188,17 +198,19 @@ function buildInstrumentTrack(config, instrumentName, track) {
 }
 
 export class MidiExporter {
-  constructor(baseConfig) {
+  private config: RuntimeConfig;
+
+  constructor(baseConfig: RuntimeConfig) {
     this.config = cloneConfig(baseConfig);
   }
 
-  setConfig(config) {
+  setConfig(config: RuntimeConfig): void {
     this.config = cloneConfig(config);
   }
 
-  createFile(tracks) {
+  createFile(tracks: ParsedTracker): Blob {
     const division = this.config.ticksPerBeat;
-    const entries = Object.entries(tracks);
+    const entries = Object.entries(tracks) as Array<[string, ParsedTrack]>;
     const header = midiHeaderChunk(entries.length + 1, division);
     const tempoTrack = buildTempoTrack(this.config);
     const trackChunks = entries.map(([instrument, track]) =>

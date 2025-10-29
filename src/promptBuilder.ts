@@ -1,6 +1,7 @@
 import { totalSteps } from './config.js';
+import type { RuntimeConfig } from './types.js';
 
-const EXAMPLE_SNIPPET = [
+const EXAMPLE_SNIPPET: readonly string[] = [
   'FORMAT EXAMPLE:',
   'BASS',
   '1 C2:80',
@@ -25,19 +26,26 @@ const EXAMPLE_SNIPPET = [
   '2 .',
   '3 B4:90',
   '4 ^',
-];
+] as const;
+
+interface PromptOptions {
+  previousContext?: string;
+  extraPrompt?: string;
+}
 
 export class PromptBuilder {
-  constructor(config) {
+  private config: RuntimeConfig;
+
+  constructor(config: RuntimeConfig) {
     this.config = config;
   }
 
-  buildQuartetPrompt({ previousContext = '', extraPrompt = '' } = {}) {
+  buildQuartetPrompt({ previousContext = '', extraPrompt = '' }: PromptOptions = {}): string {
     const steps = totalSteps(this.config);
     const bars = this.config.barsPerGeneration;
     const tempo = this.config.tempo;
 
-    const prompt = [
+    const promptLines: string[] = [
       `You are a jazz quartet generating ${bars} bars of music.`,
       'Output all 4 instruments in tracker format exactly as specified.',
       `Approximate tempo: ${tempo} BPM on a 16th-note grid.`,
@@ -67,7 +75,7 @@ export class PromptBuilder {
     ];
 
     if (previousContext) {
-      prompt.push(
+      promptLines.push(
         '',
         'PREVIOUS SECTION:',
         previousContext,
@@ -77,10 +85,10 @@ export class PromptBuilder {
     }
 
     if (extraPrompt) {
-      prompt.push('', 'PLAYER DIRECTION:', extraPrompt);
+      promptLines.push('', 'PLAYER DIRECTION:', extraPrompt);
     }
 
-    prompt.push(
+    promptLines.push(
       '',
       'OUTPUT REQUIREMENTS:',
       '1. First line must be: BASS',
@@ -95,6 +103,6 @@ export class PromptBuilder {
       'Generate the tracker data now:'
     );
 
-    return prompt.join('\n');
+    return promptLines.join('\n');
   }
 }

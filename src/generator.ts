@@ -1,8 +1,11 @@
 import { PromptBuilder } from './promptBuilder.js';
-import { TrackerStreamParser } from './trackerParser.js';
+import { TrackerParser, TrackerStreamParser } from './trackerParser.js';
 import { cloneConfig } from './config.js';
+import type { GenerationResult, RuntimeConfig, TrackerLineEvent } from './types.js';
 
-function buildMessages(promptText) {
+type StreamEmitPayload = { done?: true; chunk?: string };
+
+function buildMessages(promptText: string) {
   return [
     {
       role: 'system',
@@ -13,23 +16,24 @@ function buildMessages(promptText) {
       role: 'user',
       content: promptText,
     },
-  ];
+  ] as const;
 }
 
-function readEventStreamChunk(buffer, emit) {
+function readEventStreamChunk(buffer: string, emit: (payload: StreamEmitPayload) => void): string {
   const segments = buffer.split('\n\n');
-  let carry = segments.pop();
+  let carry = segments.pop() ?? '';
   for (const segment of segments) {
     const line = segment.trim();
-    if (!line) continue;
-    if (!line.startsWith('data:')) continue;
+    if (!line || !line.startsWith('data:')) continue;
     const payload = line.slice(5).trim();
     if (payload === '[DONE]') {
       emit({ done: true });
       continue;
     }
     try {
-      const json = JSON.parse(payload);
+      const json = JSON.parse(payload) as {
+        choices?: Array<{ delta?: { content?: string } }>;
+      };
       const delta = json?.choices?.[0]?.delta?.content ?? '';
       if (delta) {
         emit({ chunk: delta });
@@ -41,34 +45,55 @@ function readEventStreamChunk(buffer, emit) {
   return carry;
 }
 
+interface StreamSessionOptions {
+  apiKey?: string | null;
+  baseUrl: string;
+  model: string;
+  extraPrompt?: string;
+  previousContext?: string;
+  barsPerGeneration: number;
+  tempo: number;
+  swingEnabled: boolean;
+  swingRatio: number;
+  onTrackerLine?: (event: TrackerLineEvent) => void;
+  onStatus?: (message: string) => void;
+}
+
 export class JazzGenerator {
-  constructor(baseConfig) {
+  private config: RuntimeConfig;
+  private promptBuilder: PromptBuilder;
+  private activeController: AbortController | null;
+  private streamParser: TrackerStreamParser;
+
+  constructor(baseConfig: RuntimeConfig) {
     this.config = cloneConfig(baseConfig);
     this.promptBuilder = new PromptBuilder(this.config);
     this.activeController = null;
     this.streamParser = new TrackerStreamParser(this.config);
   }
 
-  abort() {
+  abort(): void {
     if (this.activeController) {
       this.activeController.abort();
       this.activeController = null;
     }
   }
 
-  async streamSession({
-    apiKey,
-    baseUrl,
-    model,
-    extraPrompt,
-    previousContext,
-    barsPerGeneration,
-    tempo,
-    swingEnabled,
-    swingRatio,
-    onTrackerLine,
-    onStatus,
-  }) {
+  async streamSession(options: StreamSessionOptions): Promise<GenerationResult> {
+    const {
+      apiKey,
+      baseUrl,
+      model,
+      extraPrompt,
+      previousContext,
+      barsPerGeneration,
+      tempo,
+      swingEnabled,
+      swingRatio,
+      onTrackerLine,
+      onStatus,
+    } = options;
+
     this.abort();
     this.config = cloneConfig({
       tempo,
@@ -80,8 +105,8 @@ export class JazzGenerator {
     this.streamParser = new TrackerStreamParser(this.config);
 
     const promptText = this.promptBuilder.buildQuartetPrompt({
-      previousContext,
-      extraPrompt,
+      previousContext: previousContext ?? '',
+      extraPrompt: extraPrompt ?? '',
     });
 
     const payload = {
@@ -98,14 +123,14 @@ export class JazzGenerator {
     const controller = new AbortController();
     this.activeController = controller;
 
-    const headers = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
     if (apiKey) {
       headers.Authorization = `Bearer ${apiKey}`;
     }
 
-    let response;
+    let response: Response;
     try {
       onStatus?.('Contacting model…');
       response = await fetch(url, {
@@ -117,9 +142,10 @@ export class JazzGenerator {
     } catch (error) {
       if (controller.signal.aborted) {
         onStatus?.('Session aborted.');
-        return { aborted: true };
+        return { trackerText: '', config: this.config, aborted: true };
       }
-      throw new Error(`Failed to contact API: ${error.message}`);
+      const err = error as Error;
+      throw new Error(`Failed to contact API: ${err.message}`);
     }
 
     if (!response.ok) {
@@ -137,7 +163,7 @@ export class JazzGenerator {
     const decoder = new TextDecoder('utf-8');
     let carry = '';
 
-    const flush = (lineInfo) => {
+    const flush = (lineInfo: StreamEmitPayload) => {
       if (lineInfo.done) {
         onStatus?.('Generation complete.');
         return;
@@ -174,3 +200,5 @@ export class JazzGenerator {
     };
   }
 }
+
+export { TrackerParser };
