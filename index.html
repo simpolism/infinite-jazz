@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Infinite Jazz – Browser Edition</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="/favicon.ico" />
   </head>
   <body>
     <main class="app">
@@ -51,16 +51,6 @@
             />
           </div>
 
-          <div class="form__group">
-            <label for="prompt">Player Direction (optional)</label>
-            <textarea
-              id="prompt"
-              name="prompt"
-              rows="3"
-              placeholder="e.g. keep the rhythm section sparse and let the sax be playful"
-            ></textarea>
-          </div>
-
           <div class="form__group form__group--inline">
             <label for="bars">Bars per section</label>
             <input
@@ -92,8 +82,24 @@
       </section>
 
       <section class="panel panel--stretch">
-        <h2>Tracker Output</h2>
-        <pre id="tracker-output" class="tracker-output" aria-live="polite"></pre>
+        <h2>Prompt Template</h2>
+        <p class="prompt-description">
+          This is the exact prompt sent to the model. Tweak it, save variants, and load past templates to experiment with different quartet behaviors.
+        </p>
+        <div class="prompt-controls">
+          <label class="prompt-controls__label" for="prompt-select">Saved prompts</label>
+          <select id="prompt-select"></select>
+          <button id="prompt-load" type="button">Load</button>
+          <button id="prompt-save" type="button">Save Current</button>
+          <button id="prompt-delete" type="button">Delete</button>
+        </div>
+        <textarea
+          id="prompt-editor"
+          class="prompt-editor"
+          rows="18"
+          spellcheck="false"
+          aria-label="Prompt template editor"
+        ></textarea>
       </section>
 
       <section class="panel">
@@ -106,10 +112,6 @@
       </section>
     </main>
 
-    <template id="tracker-line-template">
-      <code class="tracker-line"></code>
-    </template>
-
-    <script type="module" src="dist/app.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

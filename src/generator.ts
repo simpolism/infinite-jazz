@@ -50,6 +50,7 @@ interface StreamSessionOptions {
   baseUrl: string;
   model: string;
   extraPrompt?: string;
+  promptOverride?: string;
   previousContext?: string;
   barsPerGeneration: number;
   tempo: number;
@@ -57,6 +58,17 @@ interface StreamSessionOptions {
   swingRatio: number;
   onTrackerLine?: (event: TrackerLineEvent) => void;
   onStatus?: (message: string) => void;
+}
+
+function mergePromptSections(basePrompt: string, previousContext: string, extraPrompt: string): string {
+  let text = basePrompt.trimEnd();
+  if (previousContext) {
+    text += `\n\nPREVIOUS SECTION:\n${previousContext}\n\nCRITICAL: Do not copy the previous section verbatim. Vary rhythm, contour, and voicings.`;
+  }
+  if (extraPrompt) {
+    text += `\n\nPLAYER DIRECTION:\n${extraPrompt}`;
+  }
+  return text;
 }
 
 export class JazzGenerator {
@@ -104,10 +116,14 @@ export class JazzGenerator {
     this.promptBuilder = new PromptBuilder(this.config);
     this.streamParser = new TrackerStreamParser(this.config);
 
-    const promptText = this.promptBuilder.buildQuartetPrompt({
-      previousContext: previousContext ?? '',
-      extraPrompt: extraPrompt ?? '',
-    });
+    const overrideText = options.promptOverride?.trim();
+    const promptText =
+      overrideText && overrideText.length > 0
+        ? mergePromptSections(overrideText, previousContext ?? '', extraPrompt ?? '')
+        : this.promptBuilder.buildQuartetPrompt({
+            previousContext: previousContext ?? '',
+            extraPrompt: extraPrompt ?? '',
+          });
 
     const payload = {
       model,
