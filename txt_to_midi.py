@@ -75,7 +75,8 @@ def convert_txt_to_midi(
     print("Converting to MIDI...")
     midi_config = runtime_config if tempo is None else replace(runtime_config, tempo=tempo)
     midi_tempo = midi_config.tempo
-    converter = MIDIConverter(midi_config)
+    # Disable drum translation and transposition for MIDI files (use GM standard)
+    converter = MIDIConverter(midi_config, translate_drums=False, transpose_octaves=0)
     midi_file = converter.create_midi_file(combined_tracks)
 
     # Save

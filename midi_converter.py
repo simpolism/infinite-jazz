@@ -10,16 +10,24 @@ from tracker_parser import InstrumentTrack
 class MIDIConverter:
     """Converts parsed tracker data to MIDI file or messages"""
 
-    def __init__(self, runtime_config: RuntimeConfig, tempo: Optional[int] = None):
+    def __init__(self, runtime_config: RuntimeConfig, tempo: Optional[int] = None, translate_drums: Optional[bool] = None, transpose_octaves: Optional[int] = None):
         """
         Initialize MIDI converter
         Args:
             runtime_config: Immutable runtime configuration.
             tempo: BPM override (defaults to runtime_config.tempo)
+            translate_drums: Override drum translation setting (None = use config default)
+            transpose_octaves: Override octave transposition (None = use config default)
         """
         self.config = runtime_config
         self.tempo = tempo or runtime_config.tempo
         self.ticks_per_step = runtime_config.ticks_per_step
+        # Allow override of drum translation
+        self.translate_drums = translate_drums if translate_drums is not None else runtime_config.translate_drums
+        # Allow override of transposition
+        self.transpose_octaves = transpose_octaves if transpose_octaves is not None else runtime_config.transpose_octaves
+        # Track which instruments have had program changes sent (for realtime playback)
+        self._programs_sent = set()
 
     def _calculate_swing_time(self, step_idx: int) -> int:
         """
@@ -78,6 +86,29 @@ class MIDIConverter:
 
         return mid
 
+    def _translate_note(self, note_pitch: int, instrument_name: str) -> int:
+        """
+        Translate MIDI note number for hardware-specific mappings.
+
+        Args:
+            note_pitch: Original MIDI note number (e.g., GM drum note)
+            instrument_name: Instrument name (used to detect drums)
+
+        Returns:
+            Translated MIDI note number for hardware
+        """
+        # Translate drums if enabled and this is the drum track
+        if instrument_name == 'DRUMS' and self.translate_drums:
+            return self.config.drum_mapping.get(note_pitch, note_pitch)
+
+        # Transpose melodic instruments (not drums) by octaves
+        if instrument_name != 'DRUMS' and self.transpose_octaves != 0:
+            transposed = note_pitch + (self.transpose_octaves * 12)
+            # Clamp to valid MIDI range
+            return max(0, min(127, transposed))
+
+        return note_pitch
+
     def _convert_track(self, instrument_name: str, track_data: InstrumentTrack) -> mido.MidiTrack:
         """
         Convert a single instrument track to MIDI track
@@ -94,8 +125,8 @@ class MIDIConverter:
         track.append(mido.MetaMessage('track_name', name=instrument_name))
 
         # Set program (instrument) - skip for drums
-        if instrument_name != 'DRUMS':
-            program = self._get_program(instrument_name)
+        if instrument_name != 'DRUMS' and self.config.send_program_changes:
+            program = self.config.programs.get(instrument_name, 0)
             track.append(mido.Message('program_change', program=program, channel=channel, time=0))
 
         # Track active notes (dict in trigger mode, set in sustain mode)
@@ -127,16 +158,17 @@ class MIDIConverter:
                         active_notes.clear()
 
                     for note in step.notes:
+                        translated_pitch = self._translate_note(note.pitch, instrument_name)
                         track.append(mido.Message(
                             'note_on',
-                            note=note.pitch,
+                            note=translated_pitch,
                             velocity=note.velocity,
                             channel=channel,
                             time=delta
                         ))
                         delta = 0
                         last_event_time = step_start_time
-                        active_notes[note.pitch] = step_start_time
+                        active_notes[translated_pitch] = step_start_time
                 else:
                     # Rest: turn off any active notes
                     if active_notes:
@@ -171,16 +203,17 @@ class MIDIConverter:
 
                     if not step.is_rest:
                         for note in step.notes:
+                            translated_pitch = self._translate_note(note.pitch, instrument_name)
                             track.append(mido.Message(
                                 'note_on',
-                                note=note.pitch,
+                                note=translated_pitch,
                                 velocity=note.velocity,
                                 channel=channel,
                                 time=delta
                             ))
                             delta = 0
                             last_event_time = step_start_time
-                            active_notes.add(note.pitch)
+                            active_notes.add(translated_pitch)
 
         total_steps = len(track_data.steps)
         final_time = self._calculate_swing_time(total_steps)
@@ -243,20 +276,6 @@ class MIDIConverter:
             # On-beat: normal timing
             return base_time
 
-    def _get_program(self, instrument_name: str) -> int:
-        """
-        Get General MIDI program number for instrument
-        Returns:
-            MIDI program number (0-127)
-        """
-        # General MIDI program numbers (0-indexed)
-        programs = {
-            'PIANO': 0,   # Acoustic Grand Piano
-            'BASS': 33,   # Electric Bass (Finger) - louder than 32 (Acoustic Bass)
-            'SAX': 65,    # Soprano Sax (can change to 66 for Alto, 67 for Tenor)
-        }
-        return programs.get(instrument_name, 0)
-
     def create_realtime_messages(
         self,
         tracks: Dict[str, InstrumentTrack],
@@ -284,10 +303,12 @@ class MIDIConverter:
         for instrument_name, track_data in tracks.items():
             channel = self.config.channels.get(instrument_name, 0)
 
-            # Set program change at t=0
-            if instrument_name != 'DRUMS':
-                program = self._get_program(instrument_name)
-                messages.append((0.0, mido.Message('program_change', program=program, channel=channel)))
+            # Set program change at t=0 (only if not already sent for this instrument)
+            if instrument_name != 'DRUMS' and self.config.send_program_changes:
+                if instrument_name not in self._programs_sent:
+                    program = self.config.programs.get(instrument_name, 0)
+                    messages.append((0.0, mido.Message('program_change', program=program, channel=channel)))
+                    self._programs_sent.add(instrument_name)
 
             # Determine step range
             end_step = len(track_data.steps) if num_steps is None else start_step + num_steps
@@ -319,11 +340,12 @@ class MIDIConverter:
 
                     # Note on
                     for note in step.notes:
+                        translated_pitch = self._translate_note(note.pitch, instrument_name)
                         messages.append((
                             step_time,
-                            mido.Message('note_on', note=note.pitch, velocity=note.velocity, channel=channel)
+                            mido.Message('note_on', note=translated_pitch, velocity=note.velocity, channel=channel)
                         ))
-                        active_notes[note.pitch] = (note.velocity, step_time)
+                        active_notes[translated_pitch] = (note.velocity, step_time)
 
                 else:
                     # Rest: turn off any active notes
@@ -375,6 +397,10 @@ def tracker_to_midi_file(
 ) -> mido.MidiFile:
     """
     Convenience function: Convert tracker data to MIDI file
+
+    MIDI files are created with GM-standard drum notes (no translation)
+    so they play correctly on any GM-compatible device/soundfont.
+
     Args:
         tracks: Dict mapping instrument name to InstrumentTrack
         runtime_config: Immutable runtime configuration.
@@ -382,5 +408,6 @@ def tracker_to_midi_file(
     Returns:
         mido.MidiFile
     """
-    converter = MIDIConverter(runtime_config, tempo=tempo)
+    # Disable drum translation for MIDI files - use GM standard
+    converter = MIDIConverter(runtime_config, tempo=tempo, translate_drums=False)
     return converter.create_midi_file(tracks)

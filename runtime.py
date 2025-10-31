@@ -178,7 +178,10 @@ class RealtimeJazzGenerator:
         if self.save_output and self.all_sections:
             print(f"\nSaving complete MIDI file ({len(self.all_sections)} sections)...")
             combined_tracks = concatenate_sections(self.all_sections)
-            midi_file = self.midi_converter.create_midi_file(combined_tracks)
+
+            # Create a separate converter for MIDI file export (no drum translation or transposition for GM compatibility)
+            file_converter = MIDIConverter(self.midi_converter.config, translate_drums=False, transpose_octaves=0)
+            midi_file = file_converter.create_midi_file(combined_tracks)
 
             midi_file_path = self.output_dir / f"complete_{self.run_timestamp}.mid"
             midi_file.save(str(midi_file_path))
