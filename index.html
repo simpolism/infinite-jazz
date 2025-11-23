@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Infinite Jazz – Browser Edition</title>
+    <link rel="icon" href="/favicon.ico" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <h1>Infinite Jazz</h1>
+        <p class="app__tagline">Browser-based quartet generator with live playback.</p>
+      </header>
+
+      <section class="panel">
+        <h2>Session Settings</h2>
+        <form id="session-form" class="form">
+          <div class="form__group">
+            <label for="api-key">API Key</label>
+            <input
+              type="password"
+              id="api-key"
+              name="apiKey"
+              autocomplete="off"
+              required
+              placeholder="sk-..."
+            />
+          </div>
+
+          <div class="form__group">
+            <label for="base-url">Base URL</label>
+            <input
+              type="url"
+              id="base-url"
+              name="baseUrl"
+              required
+              placeholder="https://api.openai.com/v1"
+            />
+          </div>
+
+          <div class="form__group">
+            <label for="model">Model</label>
+            <input
+              type="text"
+              id="model"
+              name="model"
+              required
+              placeholder="gpt-4o-mini"
+              value="gpt-4o-mini"
+            />
+          </div>
+
+          <div class="form__group form__group--inline">
+            <label for="bars">Bars per section</label>
+            <input
+              type="number"
+              id="bars"
+              name="bars"
+              min="1"
+              max="8"
+              value="2"
+            />
+            <label for="tempo">Tempo (BPM)</label>
+            <input
+              type="number"
+              id="tempo"
+              name="tempo"
+              min="40"
+              max="280"
+              value="120"
+            />
+            <label for="swing">Swing</label>
+            <input type="checkbox" id="swing" name="swing" checked />
+          </div>
+
+          <div class="form__actions">
+            <button id="start-button" type="submit">Start Generating</button>
+            <button id="stop-button" type="button" disabled>Stop Playback</button>
+            <button id="toggle-playback" type="button" class="button--ghost">Switch to External MIDI</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel panel--stretch">
+        <h2>Prompt Template</h2>
+        <p class="prompt-description">
+          This is the exact prompt sent to the model. Tweak it, save variants, and load past templates to experiment with different quartet behaviors.
+        </p>
+        <div class="prompt-controls">
+          <label class="prompt-controls__label" for="prompt-select">Saved prompts</label>
+          <select id="prompt-select"></select>
+          <button id="prompt-load" type="button">Load</button>
+          <button id="prompt-save" type="button">Save Current</button>
+          <button id="prompt-delete" type="button">Delete</button>
+        </div>
+        <textarea
+          id="prompt-editor"
+          class="prompt-editor"
+          rows="18"
+          spellcheck="false"
+          aria-label="Prompt template editor"
+        ></textarea>
+      </section>
+
+      <section class="panel">
+        <h2>Session Status</h2>
+        <div id="status" class="status">Idle</div>
+        <div class="downloads">
+          <button id="download-midi" type="button" disabled>Download MIDI</button>
+          <button id="copy-tracker" type="button" disabled>Copy Tracker Text</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
