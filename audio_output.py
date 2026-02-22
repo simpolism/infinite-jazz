@@ -294,6 +294,11 @@ class RealtimePlayer:
                 self.is_playing = False
                 break
 
+    def wait_until_done(self):
+        """Block until the playback thread finishes naturally (queue drained)."""
+        if self.player_thread and self.player_thread.is_alive():
+            self.player_thread.join()
+
     def stop(self):
         """Stop playback"""
         self.is_playing = False

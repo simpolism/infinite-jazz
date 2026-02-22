@@ -164,6 +164,7 @@ class RealtimeJazzGenerator:
                 section_num += 1
 
             print("\nFinishing playback...")
+            self.player.wait_until_done()
             self.player.stop()
         except KeyboardInterrupt:
             print("\n\nStopping...")

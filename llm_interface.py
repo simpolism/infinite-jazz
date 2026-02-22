@@ -295,6 +295,16 @@ class LLMInterface:
         if backend == "auto":
             backend = "ollama"
 
+        # Gemini is just OpenAI-compatible with the right defaults
+        if backend == "gemini":
+            import os
+            kwargs.setdefault('base_url', 'https://generativelanguage.googleapis.com/v1beta/openai/')
+            kwargs.setdefault('api_key', os.environ.get('GEMINI_API_KEY'))
+            if not kwargs.get('api_key'):
+                raise ValueError("Gemini backend requires GEMINI_API_KEY env var or --api-key flag")
+            backend = "openai"
+            self.backend_name = "gemini"
+
         # Initialize backend
         if backend == "ollama":
             print(f"Using Ollama backend")
@@ -304,7 +314,8 @@ class LLMInterface:
         elif backend == "openai":
             print(f"Using OpenAI-compatible API backend")
             self.backend = OpenAIBackend(model_name=model, runtime_config=runtime_config, **kwargs)
-            self.backend_name = "openai"
+            if not hasattr(self, 'backend_name') or self.backend_name != "gemini":
+                self.backend_name = "openai"
 
         else:
             raise ValueError(f"Unknown backend: {backend}")

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """CLI entrypoint for the Infinite Jazz realtime generator."""
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import sys
 from dataclasses import replace
@@ -41,7 +44,7 @@ Examples:
     )
     parser.add_argument(
         '--llm-backend',
-        choices=['auto', 'ollama', 'openai'],
+        choices=['auto', 'ollama', 'openai', 'gemini'],
         default='auto',
         help='LLM backend to use (default: auto-detect)'
     )
@@ -119,6 +122,12 @@ Examples:
         type=int,
         help='Optional RNG seed forwarded to the LLM for reproducible generations'
     )
+    parser.add_argument(
+        '--hardware',
+        choices=['gm', 'tg33'],
+        default='gm',
+        help='MIDI hardware profile (default: gm for FluidSynth/software, tg33 for Yamaha TG-33)'
+    )
     return parser
 
 
@@ -136,7 +145,12 @@ def main(argv: Optional[list[str]] = None):
         list_midi_ports()
         return
 
-    runtime_config = DEFAULT_CONFIG if args.tempo is None else replace(DEFAULT_CONFIG, tempo=args.tempo)
+    runtime_config = DEFAULT_CONFIG
+    if args.hardware == 'tg33':
+        from config import _tg33_programs
+        runtime_config = replace(runtime_config, programs=_tg33_programs(), translate_drums=True, transpose_octaves=1)
+    if args.tempo is not None:
+        runtime_config = replace(runtime_config, tempo=args.tempo)
 
     llm_options = LLMOptions(
         backend=args.llm_backend,

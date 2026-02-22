@@ -72,9 +72,11 @@ class InfiniteJazzApp:
             if self.llm_options.base_url:
                 opts["base_url"] = self.llm_options.base_url
 
-        model = self.llm_options.model or (
-            "openai/gpt-oss-120b" if backend == "openai" else "qwen2.5:3b"
-        )
+        default_models = {
+            "openai": "openai/gpt-oss-120b",
+            "gemini": "gemini-2.5-flash-lite",
+        }
+        model = self.llm_options.model or default_models.get(backend, "qwen2.5:3b")
 
         return model, opts
 

@@ -84,11 +84,19 @@ def _default_drum_mapping() -> Mapping[int, int]:
 
 
 def _default_programs() -> Mapping[str, int]:
+    """General MIDI program numbers for software synths (FluidSynth etc.)."""
+    return MappingProxyType({
+        'PIANO': 0,    # Acoustic Grand Piano
+        'BASS': 33,    # Electric Bass (Finger)
+        'SAX': 65,     # Soprano Sax
+    })
+
+
+def _tg33_programs() -> Mapping[str, int]:
     """
     TG-33 program numbers (MUST be 0-63 only!)
 
     TG-33 only responds to program changes 0-63 in Voice Play Mode.
-    Programs 64-127 are IGNORED by the TG-33.
     Voice calculation: MIDI Program = (Bank-1)*8 + (Preset-1)
     """
     return MappingProxyType({
@@ -115,9 +123,9 @@ class RuntimeConfig:
     programs: Mapping[str, int] = field(default_factory=_default_programs)
     bars_per_generation: int = 2
     time_signature: Tuple[int, int] = (4, 4)
-    send_program_changes: bool = True  # Set to False to use hardware-configured programs
-    translate_drums: bool = True  # Set to False to disable GM->TG-33 drum translation
-    transpose_octaves: int = 1  # Transpose melodic instruments (not drums) by N octaves for hardware
+    send_program_changes: bool = True
+    translate_drums: bool = False  # Enable for TG-33 hardware
+    transpose_octaves: int = 0  # Set to 1 for TG-33 hardware
 
     def __post_init__(self):
         if self.note_mode not in {'trigger', 'sustain'}:
