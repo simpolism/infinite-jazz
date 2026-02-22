@@ -136,6 +136,12 @@ Examples:
         help='Bars per section (default: 2). Shorter = tighter interaction, longer = more solo space'
     )
     parser.add_argument(
+        '--head',
+        choices=['none', 'rhythm-changes'],
+        default='none',
+        help='Chord chart to anchor improvisation (default: none)'
+    )
+    parser.add_argument(
         '--hardware',
         choices=['gm', 'tg33'],
         default='gm',
@@ -187,6 +193,7 @@ def main(argv: Optional[list[str]] = None):
         prompt_style=args.prompt_style,
         seed=args.seed,
         tracker_format=args.tracker_format,
+        head=args.head,
     )
 
     app = InfiniteJazzApp(

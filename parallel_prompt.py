@@ -89,6 +89,11 @@ class ParallelPromptBuilder:
             'You may see your own recent playing (numbered lines) before the new section.',
             f'Continue numbering from where you left off and write exactly {steps} new lines.',
             'Build on what you were playing — develop your ideas, not repeat them.',
+            '',
+            'HARMONY:',
+            'The user prompt may include chord changes mapped to step ranges.',
+            'Example: "Steps 1-4: Cm7 (C,Eb,G,Bb)" means steps 1-4 are over C minor 7.',
+            'Target these chord tones — roots, thirds, fifths, sevenths, chromatic approaches.',
         ]
 
         if profile['format_notes']:
@@ -101,7 +106,8 @@ class ParallelPromptBuilder:
 
         return '\n'.join(lines)
 
-    def build_context_prompt(self, previous_context: str = '', extra_prompt: str = '') -> str:
+    def build_context_prompt(self, previous_context: str = '', extra_prompt: str = '',
+                             chord_context: str = '') -> str:
         """User prompt shared across all 4 instrument calls."""
         lines = []
 
@@ -116,6 +122,9 @@ class ParallelPromptBuilder:
         else:
             lines.append('This is the first section. Set the tone.')
 
+        if chord_context:
+            lines.extend(['', 'CHANGES FOR THIS SECTION:', chord_context])
+
         if extra_prompt:
             lines.extend(['', 'Direction:', extra_prompt])
 
@@ -129,3 +138,45 @@ class ParallelPromptBuilder:
             'ParallelPromptBuilder generates per-instrument prompts, not quartet prompts. '
             'Use build_instrument_system_prompt() and build_context_prompt() instead.'
         )
+
+
+MINIMAL_RANGES = {
+    'BASS': 'E1-G2',
+    'DRUMS': 'C2=kick D2=snare F#2=hat Bb2=open-hat Eb3=ride',
+    'PIANO': 'C3-C5, chords: NOTE:VEL,NOTE:VEL',
+    'SAX': 'A3-F5',
+}
+
+
+@dataclass
+class MinimalParallelPromptBuilder:
+    """Stripped-down parallel prompt. Format only, no character guidance."""
+
+    config: RuntimeConfig
+
+    def build_instrument_system_prompt(self, instrument: str) -> str:
+        steps = self.config.total_steps
+        return (
+            f'{instrument}. Jazz quartet. {steps} numbered lines, 16th-note grid.\n'
+            f'One step per line. Range: {MINIMAL_RANGES[instrument]}. Velocity 0-127.\n'
+            f'Example:\n'
+            f'1 C3:75\n'
+            f'2 .\n'
+            f'3 E3:70\n'
+            f'4 ^'
+        )
+
+    def build_context_prompt(self, previous_context: str = '', extra_prompt: str = '',
+                             chord_context: str = '') -> str:
+        parts = []
+        if previous_context:
+            parts.append(previous_context)
+        if chord_context:
+            parts.append(chord_context)
+        if extra_prompt:
+            parts.append(extra_prompt)
+        parts.append('Go.')
+        return '\n\n'.join(parts)
+
+    def build_quartet_prompt(self, previous_context: str = '', extra_prompt: str = '') -> str:
+        raise NotImplementedError

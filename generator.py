@@ -26,6 +26,7 @@ class GenerationPipeline:
         seed: Optional[int] = None,
         max_retries: int = 3,
         tracker_format: str = "block",
+        chart=None,
     ):
         """
         Initialize generation pipeline
@@ -36,9 +37,11 @@ class GenerationPipeline:
             verbose: Print generation details
             context_steps: Number of tracker steps per instrument to feed as context.
             tracker_format: "block" (instruments sequentially) or "interleaved" (beat-by-beat)
+            chart: Optional ChordChart for harmonic anchoring
         """
         self.llm = llm
         self.history = []  # Track previous sections for continuity
+        self.history_positions = []  # Form position for each history entry
         self.verbose = verbose
         self.config = runtime_config
         self.prompt_builder = prompt_builder_factory(runtime_config)
@@ -49,6 +52,8 @@ class GenerationPipeline:
         self.max_retries = max(1, max_retries)
         self.seed = seed
         self.tracker_format = tracker_format
+        self.chart = chart
+        self.form_position = 0  # Current position in form (bars)
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -96,8 +101,17 @@ class GenerationPipeline:
 
                 # Update history
                 self.history.append(raw_text)
+                self.history_positions.append(self.form_position)
                 if len(self.history) > self.history_limit:
                     self.history.pop(0)
+                    self.history_positions.pop(0)
+
+                # Advance form position
+                if self.chart:
+                    self.form_position = (
+                        (self.form_position + self.config.bars_per_generation)
+                        % self.chart.total_bars
+                    )
 
                 return tracks
             except Exception as exc:
@@ -156,11 +170,24 @@ class GenerationPipeline:
 
         steps = self.config.total_steps
 
+        # Build chord context as step ranges for the user prompt
+        chord_context = ''
+        if self.chart:
+            section_chords = self.chart.get_section_chords(
+                self.form_position, self.config.bars_per_generation
+            )
+            chord_lines = []
+            for beat_idx, (chord_sym, tones) in enumerate(section_chords):
+                step_start = beat_idx * 4 + 1
+                step_end = step_start + 3
+                chord_lines.append(f"Steps {step_start}-{step_end}: {chord_sym} ({tones})")
+            chord_context = '\n'.join(chord_lines)
+
         context_prompt = self.prompt_builder.build_context_prompt(
-            previous_context, self.extra_prompt
+            previous_context, self.extra_prompt, chord_context
         )
 
-        # Build per-instrument prefill from own history (numbered lines)
+        # Build per-instrument prefill from own history (numbered lines, no annotations)
         instrument_prefills = {}
         instrument_history_counts = {}
         for instrument in self.GENERATION_ORDER:
@@ -520,6 +547,7 @@ class ContinuousGenerator:
         seed: Optional[int] = None,
         prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder,
         tracker_format: str = "block",
+        chart=None,
     ):
         """
         Initialize continuous generator
@@ -530,6 +558,7 @@ class ContinuousGenerator:
             buffer_size: Number of sections to buffer ahead
             verbose: Print generation details
             tracker_format: "block" or "interleaved"
+            chart: Optional ChordChart for harmonic anchoring
         """
         import threading
 
@@ -543,6 +572,7 @@ class ContinuousGenerator:
             seed=seed,
             prompt_builder_factory=prompt_builder_factory,
             tracker_format=tracker_format,
+            chart=chart,
         )
         self.buffer_size = buffer_size
         self.buffer = []

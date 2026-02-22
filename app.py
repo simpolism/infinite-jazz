@@ -39,6 +39,7 @@ class RunOptions:
     prompt_style: str = "default"
     seed: Optional[int] = None
     tracker_format: str = "block"
+    head: str = "none"
 
 
 class InfiniteJazzApp:
@@ -131,13 +132,25 @@ class InfiniteJazzApp:
 
         prompt_builder_factory = DefaultPromptBuilder
         if self.run_options.tracker_format == "parallel":
-            from parallel_prompt import ParallelPromptBuilder
-            prompt_builder_factory = ParallelPromptBuilder
+            if self.run_options.prompt_style == "experimental":
+                from parallel_prompt import MinimalParallelPromptBuilder
+                prompt_builder_factory = MinimalParallelPromptBuilder
+            else:
+                from parallel_prompt import ParallelPromptBuilder
+                prompt_builder_factory = ParallelPromptBuilder
         elif self.run_options.tracker_format == "interleaved":
             from interleaved_prompt import InterleavedPromptBuilder
             prompt_builder_factory = InterleavedPromptBuilder
         elif self.run_options.prompt_style == "experimental":
             prompt_builder_factory = ExperimentalPromptBuilder
+
+        # Resolve chord chart
+        chart = None
+        if self.run_options.head != "none":
+            from charts import CHARTS
+            chart = CHARTS.get(self.run_options.head)
+            if chart:
+                print(f"♪ Playing over: {chart.name} ({chart.total_bars} bars)")
 
         generator = RealtimeJazzGenerator(
             llm=llm,
@@ -152,6 +165,7 @@ class InfiniteJazzApp:
             seed=self.run_options.seed,
             prompt_builder_factory=prompt_builder_factory,
             tracker_format=self.run_options.tracker_format,
+            chart=chart,
         )
 
         generator.run(num_sections=self.run_options.num_sections)

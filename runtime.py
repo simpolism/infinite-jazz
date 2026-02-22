@@ -33,6 +33,7 @@ class RealtimeJazzGenerator:
         seed: Optional[int] = None,
         prompt_builder_factory=None,
         tracker_format: str = "block",
+        chart=None,
     ):
         self.llm = llm
         self.audio_backend = audio_backend
@@ -64,6 +65,7 @@ class RealtimeJazzGenerator:
             seed=seed,
             prompt_builder_factory=prompt_builder_factory,
             tracker_format=tracker_format,
+            chart=chart,
         )
         self.prefill_delay = 0.5
         self.midi_converter = MIDIConverter(runtime_config)
