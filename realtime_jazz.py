@@ -124,10 +124,16 @@ Examples:
     )
     parser.add_argument(
         '--format',
-        choices=['block', 'interleaved'],
+        choices=['block', 'interleaved', 'parallel'],
         default='block',
         dest='tracker_format',
-        help='Tracker format: block (instruments sequentially) or interleaved (beat-by-beat, enables interaction)'
+        help='Tracker format: block (sequential), interleaved (beat-by-beat), or parallel (4 concurrent calls with prefill)'
+    )
+    parser.add_argument(
+        '--bars',
+        type=int,
+        default=None,
+        help='Bars per section (default: 2). Shorter = tighter interaction, longer = more solo space'
     )
     parser.add_argument(
         '--hardware',
@@ -156,6 +162,8 @@ def main(argv: Optional[list[str]] = None):
     if args.hardware == 'tg33':
         from config import _tg33_programs
         runtime_config = replace(runtime_config, programs=_tg33_programs(), translate_drums=True, transpose_octaves=1)
+    if args.bars is not None:
+        runtime_config = replace(runtime_config, bars_per_generation=args.bars)
     if args.tempo is not None:
         runtime_config = replace(runtime_config, tempo=args.tempo)
 

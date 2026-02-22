@@ -93,9 +93,16 @@ class OllamaBackend:
         if seed is not None:
             options['seed'] = seed
 
+        # For Ollama raw prompts, assistant prefill is appended directly
+        assistant_prefill = kwargs.pop('assistant_prefill', None)
+        kwargs.pop('system_message', None)  # Not used in raw prompt mode
+        effective_prompt = prompt
+        if assistant_prefill:
+            effective_prompt = prompt + "\n" + assistant_prefill
+
         response = self.client.generate(
             model=self.model_name,
-            prompt=prompt,
+            prompt=effective_prompt,
             options=options,
             stream=False
         )
@@ -183,10 +190,13 @@ class OpenAIBackend:
         start_time = time.time()
 
         system_message = kwargs.pop('system_message', None)
+        assistant_prefill = kwargs.pop('assistant_prefill', None)
         messages = []
         if system_message:
             messages.append({'role': 'system', 'content': system_message})
         messages.append({'role': 'user', 'content': prompt})
+        if assistant_prefill:
+            messages.append({'role': 'assistant', 'content': assistant_prefill})
 
         completion_kwargs = {
             'model': self.model_name,

@@ -130,7 +130,10 @@ class InfiniteJazzApp:
             raise
 
         prompt_builder_factory = DefaultPromptBuilder
-        if self.run_options.tracker_format == "interleaved":
+        if self.run_options.tracker_format == "parallel":
+            from parallel_prompt import ParallelPromptBuilder
+            prompt_builder_factory = ParallelPromptBuilder
+        elif self.run_options.tracker_format == "interleaved":
             from interleaved_prompt import InterleavedPromptBuilder
             prompt_builder_factory = InterleavedPromptBuilder
         elif self.run_options.prompt_style == "experimental":

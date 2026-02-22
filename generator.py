@@ -6,7 +6,7 @@ import time
 
 from llm_interface import LLMInterface
 from prompts import PromptBuilder
-from tracker_parser import parse_tracker, parse_interleaved, InstrumentTrack
+from tracker_parser import parse_tracker, parse_interleaved, InstrumentTrack, TrackerStep, TrackerParser
 from config import RuntimeConfig
 
 
@@ -70,7 +70,9 @@ class GenerationPipeline:
         last_error = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                if self.tracker_format == "interleaved":
+                if self.tracker_format == "parallel":
+                    tracks, raw_text = self._generate_parallel(previous_context)
+                elif self.tracker_format == "interleaved":
                     tracks, raw_text = self._generate_interleaved(previous_context)
                 else:
                     generated_text = self._generate_batched(previous_context)
@@ -138,6 +140,122 @@ class GenerationPipeline:
 
         tracks = parse_interleaved(raw_output)
         return tracks, raw_output
+
+    def _generate_parallel(self, previous_context: str = ""):
+        """
+        Generate all instruments via 4 parallel API calls with assistant prefill.
+
+        Each instrument gets its own call where the model inhabits that player.
+        Returns:
+            Tuple of (parsed tracks dict, raw text dict for history)
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        if self.verbose:
+            print("[PARALLEL GENERATION]")
+
+        steps = self.config.total_steps
+
+        context_prompt = self.prompt_builder.build_context_prompt(
+            previous_context, self.extra_prompt
+        )
+
+        # Build per-instrument prefill from own history (numbered lines)
+        instrument_prefills = {}
+        instrument_history_counts = {}
+        for instrument in self.GENERATION_ORDER:
+            own_lines = []
+            for section in self.history:
+                if isinstance(section, dict) and instrument in section and section[instrument]:
+                    own_lines.extend(section[instrument].split('\n'))
+            if own_lines:
+                own_lines = own_lines[-self.context_steps:]
+                numbered = [f"{i} {line}" for i, line in enumerate(own_lines, 1)]
+                instrument_prefills[instrument] = (
+                    f"{instrument}\n" + '\n'.join(numbered) + '\n'
+                )
+                instrument_history_counts[instrument] = len(own_lines)
+            else:
+                instrument_prefills[instrument] = f"{instrument}\n"
+                instrument_history_counts[instrument] = 0
+
+        def generate_instrument(instrument: str):
+            system_prompt = self.prompt_builder.build_instrument_system_prompt(instrument)
+            prefill = instrument_prefills[instrument]
+            history_count = instrument_history_counts[instrument]
+
+            # Stop after generating total_steps new lines
+            # Model continues numbering from history, so stop at history + steps + 1
+            stop_line = history_count + steps + 1
+            inst_stop_seqs = [f"\n{stop_line} ", f"\n{stop_line}."]
+
+            # Scale token budget: ~10 tokens per line, with headroom
+            max_toks = max(1024, (history_count + steps) * 12)
+
+            gen_config = {
+                'max_tokens': max_toks,
+                'temperature': 1.05,
+                'top_p': 0.99,
+                'repeat_penalty': 1.0,
+                'system_message': system_prompt,
+                'assistant_prefill': prefill,
+                'stop': inst_stop_seqs,
+            }
+            if self.seed is not None:
+                gen_config['seed'] = self.seed
+
+            result = self.llm.generate(context_prompt, **gen_config)
+
+            if self.verbose:
+                print(
+                    f"  [{instrument}] {result.tokens} tokens, "
+                    f"{result.latency:.2f}s, finish={result.finish_reason}"
+                )
+
+            return instrument, result.text
+
+        tracks = {}
+        raw_texts = {}
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                executor.submit(generate_instrument, inst): inst
+                for inst in self.GENERATION_ORDER
+            }
+
+            for future in as_completed(futures):
+                instrument = futures[future]
+                try:
+                    inst, raw_text = future.result()
+                    cleaned = self._clean_output(raw_text, inst)
+                    # Take only the last total_steps lines — strips echoed prefill
+                    # regardless of whether the provider echoes it or not
+                    cleaned_lines = [l for l in cleaned.split('\n') if l.strip()]
+                    if len(cleaned_lines) > steps:
+                        cleaned = '\n'.join(cleaned_lines[-steps:])
+                    validated = self._validate_output(cleaned, inst)
+                    raw_texts[inst] = validated
+
+                    lines = validated.split('\n')
+                    track = TrackerParser.parse_track(inst, lines)
+                    tracks[inst] = track
+                except Exception as exc:
+                    print(f"  {instrument} generation failed: {exc}")
+
+        # Fill missing instruments with rests
+        for instrument in self.GENERATION_ORDER:
+            if instrument not in tracks:
+                print(f"  Filling {instrument} with rests")
+                rest_steps = [
+                    TrackerStep(notes=[], is_rest=True, is_tie=False)
+                    for _ in range(steps)
+                ]
+                tracks[instrument] = InstrumentTrack(
+                    instrument=instrument, steps=rest_steps
+                )
+                raw_texts[instrument] = '\n'.join(['.'] * steps)
+
+        return tracks, raw_texts
 
     def _generate_batched(self, previous_context: str = "") -> Dict[str, str]:
         """
