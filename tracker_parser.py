@@ -230,7 +230,82 @@ class TrackerParser:
         return tracks
 
 
-# Convenience function
+    @staticmethod
+    def parse_interleaved(text: str) -> Dict[str, InstrumentTrack]:
+        """
+        Parse chunk-interleaved tracker format.
+
+        Expected format:
+        [BEAT 1]
+        BASS: C2:80 . . .
+        DRUMS: C2:90,F#2:60 F#2:60 F#2:60 D2:80
+        PIANO: C3:70,E3:65,G3:68 . . .
+        SAX: G4:75 . . .
+
+        [BEAT 2]
+        BASS: E2:75 . . .
+        ...
+
+        Each instrument line has 4 space-separated steps (one beat of 16th notes).
+        Steps use the same notation as block format: NOTE:VEL, chords, dots, carets.
+
+        Returns dict mapping instrument name to InstrumentTrack.
+        """
+        accumulated: Dict[str, List[TrackerStep]] = {
+            inst: [] for inst in ['BASS', 'DRUMS', 'PIANO', 'SAX']
+        }
+
+        # Clean up markdown/unicode
+        text = re.sub(r'```[\w]*\n?', '', text)
+        text = text.replace('\u266f', '#').replace('\u266d', 'b')
+
+        for line in text.strip().split('\n'):
+            line = line.strip()
+
+            # Skip empty lines, comments, beat markers
+            if not line or line.startswith('#') or re.match(r'^\[.*\]$', line):
+                continue
+
+            # Match instrument lines: "BASS: C2:80 . . ."
+            m = re.match(r'^(BASS|DRUMS|PIANO|SAX)\s*:\s*(.+)$', line)
+            if not m:
+                continue
+
+            instrument = m.group(1)
+            step_data = m.group(2).strip()
+
+            # Split steps by whitespace (chords like "C3:70,E3:65" stay intact)
+            step_tokens = step_data.split()
+
+            for token in step_tokens:
+                token = token.strip()
+                if not token:
+                    continue
+                try:
+                    notes, is_tie = TrackerParser.parse_note_entry(token)
+                    is_rest = len(notes) == 0 and not is_tie
+                    accumulated[instrument].append(
+                        TrackerStep(notes=notes, is_rest=is_rest, is_tie=is_tie)
+                    )
+                except ValueError:
+                    accumulated[instrument].append(
+                        TrackerStep(notes=[], is_rest=True, is_tie=False)
+                    )
+
+        tracks = {}
+        for instrument, steps in accumulated.items():
+            if steps:
+                tracks[instrument] = InstrumentTrack(instrument=instrument, steps=steps)
+
+        return tracks
+
+
+# Convenience functions
 def parse_tracker(tracker_text: str) -> Dict[str, InstrumentTrack]:
-    """Parse tracker format text. Returns dict of instrument -> InstrumentTrack"""
+    """Parse block tracker format text. Returns dict of instrument -> InstrumentTrack"""
     return TrackerParser.parse(tracker_text)
+
+
+def parse_interleaved(tracker_text: str) -> Dict[str, InstrumentTrack]:
+    """Parse interleaved tracker format text. Returns dict of instrument -> InstrumentTrack"""
+    return TrackerParser.parse_interleaved(tracker_text)

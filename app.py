@@ -38,6 +38,7 @@ class RunOptions:
     prompt: Optional[str] = None
     prompt_style: str = "default"
     seed: Optional[int] = None
+    tracker_format: str = "block"
 
 
 class InfiniteJazzApp:
@@ -129,7 +130,10 @@ class InfiniteJazzApp:
             raise
 
         prompt_builder_factory = DefaultPromptBuilder
-        if self.run_options.prompt_style == "experimental":
+        if self.run_options.tracker_format == "interleaved":
+            from interleaved_prompt import InterleavedPromptBuilder
+            prompt_builder_factory = InterleavedPromptBuilder
+        elif self.run_options.prompt_style == "experimental":
             prompt_builder_factory = ExperimentalPromptBuilder
 
         generator = RealtimeJazzGenerator(
@@ -144,6 +148,7 @@ class InfiniteJazzApp:
             prompt_style=self.run_options.prompt_style,
             seed=self.run_options.seed,
             prompt_builder_factory=prompt_builder_factory,
+            tracker_format=self.run_options.tracker_format,
         )
 
         generator.run(num_sections=self.run_options.num_sections)

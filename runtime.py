@@ -31,7 +31,8 @@ class RealtimeJazzGenerator:
         extra_prompt: str = "",
         prompt_style: str = "default",
         seed: Optional[int] = None,
-        prompt_builder_factory=None
+        prompt_builder_factory=None,
+        tracker_format: str = "block",
     ):
         self.llm = llm
         self.audio_backend = audio_backend
@@ -44,6 +45,7 @@ class RealtimeJazzGenerator:
         self.extra_prompt = extra_prompt
         self.prompt_style = prompt_style
         self.seed = seed
+        self.tracker_format = tracker_format
 
         self.run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -60,7 +62,8 @@ class RealtimeJazzGenerator:
             context_steps=context_steps,
             extra_prompt=extra_prompt,
             seed=seed,
-            prompt_builder_factory=prompt_builder_factory
+            prompt_builder_factory=prompt_builder_factory,
+            tracker_format=tracker_format,
         )
         self.prefill_delay = 0.5
         self.midi_converter = MIDIConverter(runtime_config)

@@ -123,6 +123,13 @@ Examples:
         help='Optional RNG seed forwarded to the LLM for reproducible generations'
     )
     parser.add_argument(
+        '--format',
+        choices=['block', 'interleaved'],
+        default='block',
+        dest='tracker_format',
+        help='Tracker format: block (instruments sequentially) or interleaved (beat-by-beat, enables interaction)'
+    )
+    parser.add_argument(
         '--hardware',
         choices=['gm', 'tg33'],
         default='gm',
@@ -171,6 +178,7 @@ def main(argv: Optional[list[str]] = None):
         prompt=args.prompt.strip() if args.prompt else None,
         prompt_style=args.prompt_style,
         seed=args.seed,
+        tracker_format=args.tracker_format,
     )
 
     app = InfiniteJazzApp(

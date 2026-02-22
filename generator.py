@@ -6,7 +6,7 @@ import time
 
 from llm_interface import LLMInterface
 from prompts import PromptBuilder
-from tracker_parser import parse_tracker, InstrumentTrack
+from tracker_parser import parse_tracker, parse_interleaved, InstrumentTrack
 from config import RuntimeConfig
 
 
@@ -24,7 +24,8 @@ class GenerationPipeline:
         extra_prompt: str = "",
         prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder,
         seed: Optional[int] = None,
-        max_retries: int = 3
+        max_retries: int = 3,
+        tracker_format: str = "block",
     ):
         """
         Initialize generation pipeline
@@ -34,6 +35,7 @@ class GenerationPipeline:
             runtime_config: Immutable runtime configuration.
             verbose: Print generation details
             context_steps: Number of tracker steps per instrument to feed as context.
+            tracker_format: "block" (instruments sequentially) or "interleaved" (beat-by-beat)
         """
         self.llm = llm
         self.history = []  # Track previous sections for continuity
@@ -46,6 +48,7 @@ class GenerationPipeline:
         self.history_limit = max(3, (self.context_steps // steps_per_section) + 2)
         self.max_retries = max(1, max_retries)
         self.seed = seed
+        self.tracker_format = tracker_format
 
     def generate_section(self, previous_context: str = "") -> Dict[str, InstrumentTrack]:
         """
@@ -67,11 +70,13 @@ class GenerationPipeline:
         last_error = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                generated_text = self._generate_batched(previous_context)
-
-                # Parse all parts together
-                full_tracker = self._assemble_tracker(generated_text)
-                tracks = parse_tracker(full_tracker)
+                if self.tracker_format == "interleaved":
+                    tracks, raw_text = self._generate_interleaved(previous_context)
+                else:
+                    generated_text = self._generate_batched(previous_context)
+                    full_tracker = self._assemble_tracker(generated_text)
+                    tracks = parse_tracker(full_tracker)
+                    raw_text = generated_text
 
                 expected_steps = self.config.total_steps
                 invalid_instruments = []
@@ -83,10 +88,12 @@ class GenerationPipeline:
                 if invalid_instruments:
                     raise ValueError(
                         f"Incomplete tracker data for: {', '.join(invalid_instruments)}"
+                        f" (got {', '.join(f'{i}={len(tracks[i].steps) if i in tracks else 0}' for i in invalid_instruments)},"
+                        f" expected {expected_steps} each)"
                     )
 
                 # Update history
-                self.history.append(generated_text)
+                self.history.append(raw_text)
                 if len(self.history) > self.history_limit:
                     self.history.pop(0)
 
@@ -97,6 +104,40 @@ class GenerationPipeline:
                 time.sleep(0.5)
 
         raise RuntimeError(f"Failed to generate a valid section after {self.max_retries} attempts") from last_error
+
+    def _generate_interleaved(self, previous_context: str = ""):
+        """
+        Generate all instruments in interleaved (beat-by-beat) format.
+
+        Returns:
+            Tuple of (parsed tracks dict, raw output text for history)
+        """
+        if self.verbose:
+            print("[INTERLEAVED GENERATION]")
+
+        prompt = self.prompt_builder.build_quartet_prompt(previous_context, self.extra_prompt)
+
+        gen_config = {
+            'max_tokens': 4096,
+            'temperature': 1.05,
+            'top_p': 0.99,
+            'repeat_penalty': 1.0,
+        }
+        if self.seed is not None:
+            gen_config['seed'] = self.seed
+
+        result = self.llm.generate(prompt, **gen_config)
+        raw_output = result.text
+
+        if self.verbose:
+            print(
+                f"\nLLM stats: backend={result.backend}, tokens={result.tokens}, "
+                f"latency={result.latency:.2f}s, finish_reason={result.finish_reason}"
+            )
+            print(f"\nRaw output length: {len(raw_output)} chars")
+
+        tracks = parse_interleaved(raw_output)
+        return tracks, raw_output
 
     def _generate_batched(self, previous_context: str = "") -> Dict[str, str]:
         """
@@ -312,6 +353,20 @@ class GenerationPipeline:
         """Get previous section for continuity (truncated to last few notes)"""
         if not self.history or self.context_steps <= 0:
             return ""
+
+        if self.tracker_format == "interleaved":
+            # For interleaved, history entries are raw text strings
+            # Just return the tail of the most recent section
+            recent = self.history[-1]
+            if isinstance(recent, str):
+                lines = recent.strip().split('\n')
+                # Keep roughly the last N beats (4 lines per beat)
+                beats_to_keep = max(1, self.context_steps // 4)
+                lines_to_keep = beats_to_keep * 5  # 4 instrument lines + 1 beat marker per beat
+                if len(lines) > lines_to_keep:
+                    return "...\n" + '\n'.join(lines[-lines_to_keep:])
+                return '\n'.join(lines)
+
         aggregated = {instrument: [] for instrument in self.GENERATION_ORDER}
 
         for section in self.history:
@@ -345,7 +400,8 @@ class ContinuousGenerator:
         context_steps: int = 32,
         extra_prompt: str = "",
         seed: Optional[int] = None,
-        prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder
+        prompt_builder_factory: Callable[[RuntimeConfig], PromptBuilder] = PromptBuilder,
+        tracker_format: str = "block",
     ):
         """
         Initialize continuous generator
@@ -355,6 +411,7 @@ class ContinuousGenerator:
             runtime_config: Immutable runtime configuration.
             buffer_size: Number of sections to buffer ahead
             verbose: Print generation details
+            tracker_format: "block" or "interleaved"
         """
         import threading
 
@@ -366,7 +423,8 @@ class ContinuousGenerator:
             context_steps=context_steps,
             extra_prompt=extra_prompt,
             seed=seed,
-            prompt_builder_factory=prompt_builder_factory
+            prompt_builder_factory=prompt_builder_factory,
+            tracker_format=tracker_format,
         )
         self.buffer_size = buffer_size
         self.buffer = []
